@@ -1,0 +1,93 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Planche",
+  "version": "0.1.0",
+  "identifier": "com.planche.reader",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Planche",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 640,
+        "minHeight": 480
+      }
+    ],
+    "security": {
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "worker-src": "'self' blob:",
+        "style-src": "'self' 'unsafe-inline' blob:",
+        "img-src": "'self' blob: data: http://planche.localhost planche:",
+        "font-src": "'self' data: blob:",
+        "media-src": "'self' blob: http://planche.localhost planche:",
+        "connect-src": "'self' ipc: http://ipc.localhost http://planche.localhost planche:",
+        "frame-src": "'self' blob: about:",
+        "object-src": "'none'",
+        "base-uri": "'self'",
+        "form-action": "'none'"
+      },
+      "devCsp": null,
+      "dangerousDisableAssetCspModification": [
+        "style-src"
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "fileAssociations": [
+      {
+        "ext": ["cbz"],
+        "name": "Bande dessinée",
+        "description": "Bande dessinée",
+        "role": "Viewer",
+        "mimeType": "application/vnd.comicbook+zip"
+      },
+      {
+        "ext": ["cbr"],
+        "name": "Bande dessinée",
+        "description": "Bande dessinée",
+        "role": "Viewer",
+        "mimeType": "application/vnd.comicbook-rar"
+      },
+      {
+        "ext": ["cb7"],
+        "name": "Bande dessinée",
+        "description": "Bande dessinée",
+        "role": "Viewer",
+        "mimeType": "application/x-cb7"
+      },
+      {
+        "ext": ["cbt"],
+        "name": "Bande dessinée",
+        "description": "Bande dessinée",
+        "role": "Viewer",
+        "mimeType": "application/x-cbt"
+      },
+      {
+        "ext": [
+          "epub"
+        ],
+        "name": "Livre EPUB",
+        "description": "Livre EPUB",
+        "role": "Viewer",
+        "mimeType": "application/epub+zip"
+      }
+    ]
+  }
+}

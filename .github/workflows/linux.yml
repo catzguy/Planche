@@ -1,0 +1,49 @@
+# Builds the Linux packages (.deb, .rpm, .AppImage) of Planche.
+# Ubuntu 22.04 keeps the glibc requirement low so the packages run on
+# Debian 12+, Ubuntu 22.04+, Fedora 36+ and their derivatives.
+name: Linux
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: planche
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl wget file libwebkit2gtk-4.1-dev \
+            libssl-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: planche/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: planche/src-tauri
+
+      - run: npm ci
+      - run: node scripts/i18n-keys.mjs
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - run: npm run tauri build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: planche-linux
+          path: |
+            planche/src-tauri/target/release/bundle/deb/*.deb
+            planche/src-tauri/target/release/bundle/rpm/*.rpm
+            planche/src-tauri/target/release/bundle/appimage/*.AppImage
