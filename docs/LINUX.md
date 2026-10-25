@@ -24,13 +24,13 @@ Pour compiler soi-même : un installateur Linux ne peut pas être produit depuis
 
 ### 1. Compilation automatique (GitHub Actions)
 
-Le fichier `.github/workflows/linux.yml` compile Planche sur un serveur Linux de GitHub et publie trois paquets :
+Le fichier `.github/workflows/linux.yml` compile Planche sur un serveur Linux de GitHub et produit trois paquets :
 
-- `Planche_0.1.0_amd64.deb` — Debian, Ubuntu, Mint ;
-- `Planche-0.1.0-1.x86_64.rpm` — Fedora, openSUSE ;
-- `Planche_0.1.0_amd64.AppImage` — toutes distributions, sans installation.
+- `Planche_<version>_amd64.deb` — Debian, Ubuntu, Mint ;
+- `Planche-<version>-1.x86_64.rpm` — Fedora, openSUSE ;
+- `Planche_<version>_amd64.AppImage` — toutes distributions, sans installation.
 
-Sur [github.com/catzguy/Planche](https://github.com/catzguy/Planche), onglet *Actions* : ouvrir la dernière exécution réussie du workflow « Linux » et télécharger l'artefact `planche-linux` (archive zip contenant les trois paquets ; connexion à GitHub requise). Pour une nouvelle compilation : bouton *Run workflow*, ou pousser une étiquette `v0.1.0`.
+Le workflow `release.yml` les publie automatiquement dans les [Releases](https://github.com/catzguy/Planche/releases) : à chaque étiquette `vX.Y.Z` (version stable) et à chaque fusion dans `develop` (pré-version `develop-latest`). Pour une compilation ponctuelle sans publication : onglet *Actions* > workflow « Linux » > *Run workflow*, puis artefact `planche-linux` (connexion à GitHub requise).
 
 ### 2. Compilation sur le poste Linux
 
