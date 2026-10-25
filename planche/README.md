@@ -1,6 +1,6 @@
 # Planche
 
-Lecteur de BD, mangas et livres numériques multiplateforme (Tauri 2 + Rust + React), reconstruction fonctionnelle de Cover — voir [../docs/REVERSE_ENGINEERING.md](../docs/REVERSE_ENGINEERING.md) — enrichie des fonctions de liseuse de Thorium ([../docs/COMPARAISON_THORIUM.md](../docs/COMPARAISON_THORIUM.md)).
+Lecteur de BD, mangas et livres numériques multiplateforme (Tauri 2 + Rust + React).
 
 ## Lancer
 
