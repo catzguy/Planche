@@ -20,11 +20,18 @@ concurrency:
   cancel-in-progress: ${{ github.ref_type == 'branch' }}
 
 jobs:
+  # A called workflow cannot ask for more than its caller grants.
   windows:
     uses: ./.github/workflows/windows.yml
+    permissions:
+      contents: read
+      pull-requests: write
 
   linux:
     uses: ./.github/workflows/linux.yml
+    permissions:
+      contents: read
+      pull-requests: write
 
   publish:
     needs: [windows, linux]
