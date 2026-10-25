@@ -28,7 +28,7 @@ Le fichier `.github/workflows/linux.yml` compile Planche sur un serveur Linux de
 - `Planche-0.1.0-1.x86_64.rpm` — Fedora, openSUSE ;
 - `Planche_0.1.0_amd64.AppImage` — toutes distributions, sans installation.
 
-Lancer le workflow « Linux » (onglet *Actions*) ou pousser une étiquette `v0.1.0`. Les paquets sont dans l'artefact `planche-linux`.
+Sur [github.com/catzguy/Planche](https://github.com/catzguy/Planche), onglet *Actions* : ouvrir la dernière exécution réussie du workflow « Linux » et télécharger l'artefact `planche-linux` (archive zip contenant les trois paquets ; connexion à GitHub requise). Pour une nouvelle compilation : bouton *Run workflow*, ou pousser une étiquette `v0.1.0`.
 
 ### 2. Compilation sur le poste Linux
 
@@ -75,8 +75,7 @@ Avec le `.deb` ou le `.rpm`, Planche apparaît dans le menu des applications et 
 Dans le gestionnaire de fichiers (Nautilus, Dolphin, Nemo, Thunar) : clic droit sur un fichier `.epub` ou `.cbz` > *Ouvrir avec* > Planche > *Définir par défaut* / *Toujours utiliser*. En ligne de commande :
 
 ```bash
-desktop=$(basename "$(grep -l '^Exec=planche' /usr/share/applications/*.desktop)")
-xdg-mime default "$desktop" application/epub+zip application/vnd.comicbook+zip application/vnd.comicbook-rar application/x-cb7 application/x-cbt
+xdg-mime default Planche.desktop application/epub+zip application/vnd.comicbook+zip application/vnd.comicbook-rar application/x-cb7 application/x-cbt
 ```
 
 ## Où sont les données
@@ -108,5 +107,7 @@ xdg-mime default "$desktop" application/epub+zip application/vnd.comicbook+zip a
   - Sans Secret Service, Planche ne démarrait pas (clé de la base introuvable) : ajout de la clé de secours décrite plus haut, avec test.
   - Seul le `.cbz` aurait été associé à Planche (un seul type MIME déclaré pour les quatre extensions BD) : chaque extension a maintenant son type.
   - La lecture à voix haute provoquait une erreur sans synthèse vocale : message clair à la place.
+  - L'entrée de menu ne transmettait pas le fichier double-cliqué (`Exec=planche` sans `%F`), avec une description « A Tauri App » et sans catégorie : modèle `src-tauri/planche.desktop` (catégories Bureautique / Visionneuse / Graphisme).
+- **Compilation sous Linux (GitHub Actions, Ubuntu 22.04)** : réussie, avec les 6 tests Rust (dont les droits 600 du fichier de clé de secours) et la vérification des 27 langues. Paquets produits : `.deb` (6,3 Mo), `.rpm` (6,3 Mo), AppImage (82,7 Mo). Contenu du `.deb` contrôlé : dépendances `libwebkit2gtk-4.1-0` et `libgtk-3-0`, entrée de menu `Planche.desktop` avec `Exec=planche %F` et les 5 types MIME.
 - **Non-régression sous Windows** : version de production recompilée, PDF affiché par la nouvelle version de pdf.js, bibliothèque et progression intactes, 6 tests Rust passés (dont la clé de secours). Ce test a aussi révélé et fait corriger un bug valable sur toutes les plateformes : après la migration vers la base chiffrée, Planche plantait au démarrage suivant (en-tête « WAL » hérité de l'ancien fichier SQLite).
-- **Pas encore vérifié** : un lancement réel sous Linux. Ce PC n'a ni WSL ni machine virtuelle Linux ; la première compilation (GitHub Actions ou poste Linux) fera foi.
+- **Pas encore vérifié** : l'utilisation réelle sur un bureau Linux (affichage, lecture, coffre de clés, impression, synthèse vocale). Ce PC n'a ni WSL ni machine virtuelle Linux.
