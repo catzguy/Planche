@@ -1,0 +1,15 @@
+[Desktop Entry]
+Categories=Office;Viewer;Graphics;
+{{#if comment}}
+Comment={{comment}}
+{{/if}}
+Exec={{exec}} %F
+StartupWMClass={{exec}}
+Icon={{icon}}
+Name={{name}}
+Keywords=comic;manga;bd;bande dessinée;ebook;epub;pdf;cbz;cbr;
+Terminal=false
+Type=Application
+{{#if mime_type}}
+MimeType={{mime_type}}
+{{/if}}
