@@ -10,4 +10,4 @@ Lecteur de bandes dessinées, mangas, PDF et EPUB pour Windows, Linux et macOS (
 | [`docs/COMPARAISON_THORIUM.md`](docs/COMPARAISON_THORIUM.md) | Comparaison avec Thorium Reader |
 | [`docs/REVERSE_ENGINEERING.md`](docs/REVERSE_ENGINEERING.md) | Analyse de l'application Cover d'origine |
 
-Paquets Linux (`.deb`, `.rpm`, AppImage) : workflow « Linux » dans l'onglet *Actions*.
+**Télécharger** : [dernière version](https://github.com/catzguy/Planche/releases/latest) — installateur Windows (`.exe`, `.msi`) et paquets Linux (`.deb`, `.rpm`, AppImage).

@@ -18,7 +18,9 @@ Environnements de bureau : GNOME, KDE Plasma, Cinnamon, XFCE, MATE, Budgie… en
 
 ## Obtenir les paquets
 
-Un installateur Linux ne peut pas être produit depuis Windows : il se compile **sur Linux**. Deux possibilités.
+Le plus simple : télécharger le `.deb`, le `.rpm` ou l'AppImage sur la page des versions, [github.com/catzguy/Planche/releases](https://github.com/catzguy/Planche/releases/latest).
+
+Pour compiler soi-même : un installateur Linux ne peut pas être produit depuis Windows, il se compile **sur Linux**. Deux possibilités.
 
 ### 1. Compilation automatique (GitHub Actions)
 
