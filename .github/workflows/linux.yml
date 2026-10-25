@@ -23,7 +23,7 @@ jobs:
           sudo apt-get install -y build-essential curl wget file libwebkit2gtk-4.1-dev \
             libssl-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
