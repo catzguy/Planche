@@ -1,25 +1,54 @@
-# Weekly dependency updates, opened against develop. Minor and patch
-# updates are grouped into one pull request per ecosystem.
+# Dependency updates, opened against develop (checked by the Windows workflow).
+# React and Tauri get their own pull requests, majors included; other Rust
+# crates share one for minor/patch updates and get one each for a major.
+# A dependency goes to the first group whose patterns match it.
 # https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
 
 version: 2
 updates:
+  # Front-end (planche/package.json)
   - package-ecosystem: "npm"
     directory: "/planche"
     target-branch: "develop"
     schedule:
-      interval: "weekly"
+      interval: "daily"
+      time: "06:00"
+      timezone: "Europe/Paris"
+    commit-message:
+      prefix: "npm"
     groups:
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+          - "@vitejs/plugin-react"
+      tauri-js:
+        patterns:
+          - "@tauri-apps/*"
       npm-minor:
         update-types: ["minor", "patch"]
 
+  # Back-end (planche/src-tauri/Cargo.toml)
   - package-ecosystem: "cargo"
     directory: "/planche/src-tauri"
     target-branch: "develop"
     schedule:
-      interval: "weekly"
+      interval: "daily"
+      time: "06:00"
+      timezone: "Europe/Paris"
+    commit-message:
+      prefix: "cargo"
     groups:
-      cargo-minor:
+      tauri:
+        patterns:
+          - "tauri"
+          - "tauri-build"
+          - "tauri-plugin-*"
+      rust:
+        patterns:
+          - "*"
         update-types: ["minor", "patch"]
 
   - package-ecosystem: "github-actions"
@@ -27,3 +56,5 @@ updates:
     target-branch: "develop"
     schedule:
       interval: "weekly"
+    commit-message:
+      prefix: "ci"
