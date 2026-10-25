@@ -4,6 +4,8 @@
 #   The tag must match the version in planche/src-tauri/tauri.conf.json.
 # - Push to develop: replaces the "develop-latest" pre-release with packages
 #   of the latest develop commit, for testing.
+# - Tag v1.2.3, when the Store is configured: also submits the MSIX to the
+#   Microsoft Store.
 name: Release
 
 on:
@@ -44,10 +46,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The unsigned MSIX (planche-msix) goes to the Store only.
       - uses: actions/download-artifact@v8
         with:
+          name: planche-windows
           path: packages
-          merge-multiple: true
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: planche-linux
+          path: packages
 
       - name: List packages
         run: find packages -type f -exec ls -lh {} \;
@@ -74,3 +82,28 @@ jobs:
             --target "$GITHUB_SHA" --prerelease --latest=false \
             --title "Planche develop (${GITHUB_SHA::7})" \
             --notes "Version de test compilée automatiquement depuis la branche develop (commit $GITHUB_SHA). Elle est remplacée à chaque fusion dans develop ; pour un usage normal, préférer la dernière version stable."
+
+  # Submits the MSIX of a version to the Microsoft Store, once the GitHub
+  # release is published. Needs the MSSTORE_PRODUCT_ID variable and the Partner
+  # Center secrets (docs/MICROSOFT_STORE.md); skipped otherwise.
+  store:
+    needs: [windows, publish]
+    if: github.ref_type == 'tag' && vars.MSSTORE_PRODUCT_ID != ''
+    runs-on: windows-latest
+    environment: microsoft-store
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: planche-msix
+          path: msix
+
+      - uses: microsoft/microsoft-store-apppublisher@v1.4
+
+      - name: Partner Center credentials
+        run: msstore reconfigure --tenantId "${{ secrets.PARTNER_CENTER_TENANT_ID }}" --sellerId "${{ secrets.PARTNER_CENTER_SELLER_ID }}" --clientId "${{ secrets.PARTNER_CENTER_CLIENT_ID }}" --clientSecret "${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}"
+
+      - name: Submit to the Microsoft Store
+        shell: pwsh
+        run: |
+          $package = Get-ChildItem msix\*.msix | Select-Object -First 1
+          msstore publish $package.FullName --appId "${{ vars.MSSTORE_PRODUCT_ID }}"

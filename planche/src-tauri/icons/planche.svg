@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Planche: a comic page of four panels, the last one with a speech bubble. -->
+  <rect x="32" y="32" width="960" height="960" rx="208" fill="#1E3A5F"/>
+  <rect x="176" y="176" width="352" height="384" rx="36" fill="#F5F1E8"/>
+  <rect x="568" y="176" width="280" height="176" rx="36" fill="#F5F1E8"/>
+  <rect x="568" y="392" width="280" height="168" rx="36" fill="#F5F1E8"/>
+  <rect x="176" y="600" width="672" height="248" rx="36" fill="#F2A541"/>
+  <ellipse cx="420" cy="712" rx="150" ry="70" fill="#F5F1E8"/>
+  <path d="M352 762 L318 818 L408 776 Z" fill="#F5F1E8"/>
+</svg>
