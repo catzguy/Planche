@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- MSIX manifest for the Microsoft Store. scripts/build-msix.ps1 fills the
+     $(...) values; Identity and Publisher come from Partner Center. -->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap rescap">
+
+  <Identity
+    Name="$(IdentityName)"
+    Publisher="$(Publisher)"
+    Version="$(Version)"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>Planche</DisplayName>
+    <PublisherDisplayName>$(PublisherDisplayName)</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <Description>Lecteur de bandes dessinées, mangas, PDF et EPUB</Description>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="fr-FR" />
+  </Resources>
+
+  <Applications>
+    <Application Id="Planche" Executable="planche.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="Planche"
+        Description="Lecteur de bandes dessinées, mangas, PDF et EPUB"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Square71x71Logo="Assets\Square71x71Logo.png" />
+      </uap:VisualElements>
+      <Extensions>
+        <!-- Windows passes the opened file as the first command-line argument. -->
+        <uap:Extension Category="windows.fileTypeAssociation">
+          <uap:FileTypeAssociation Name="comicbook">
+            <uap:DisplayName>Bande dessinée</uap:DisplayName>
+            <uap:SupportedFileTypes>
+              <uap:FileType ContentType="application/vnd.comicbook+zip">.cbz</uap:FileType>
+              <uap:FileType ContentType="application/vnd.comicbook-rar">.cbr</uap:FileType>
+              <uap:FileType ContentType="application/x-cb7">.cb7</uap:FileType>
+              <uap:FileType ContentType="application/x-cbt">.cbt</uap:FileType>
+            </uap:SupportedFileTypes>
+          </uap:FileTypeAssociation>
+        </uap:Extension>
+        <uap:Extension Category="windows.fileTypeAssociation">
+          <uap:FileTypeAssociation Name="epub">
+            <uap:DisplayName>Livre EPUB</uap:DisplayName>
+            <uap:SupportedFileTypes>
+              <uap:FileType ContentType="application/epub+zip">.epub</uap:FileType>
+            </uap:SupportedFileTypes>
+          </uap:FileTypeAssociation>
+        </uap:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <Capability Name="internetClient" />
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>
