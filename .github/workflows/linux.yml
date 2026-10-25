@@ -1,12 +1,12 @@
 # Builds the Linux packages (.deb, .rpm, .AppImage) of Planche.
 # Ubuntu 22.04 keeps the glibc requirement low so the packages run on
 # Debian 12+, Ubuntu 22.04+, Fedora 36+ and their derivatives.
+# release.yml calls it to publish versions.
 name: Linux
 
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read

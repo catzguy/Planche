@@ -1,13 +1,13 @@
 # Builds the Windows installers (NSIS .exe and .msi) of Planche.
 # Tauri downloads NSIS and WiX itself; the runner provides MSVC and WebView2.
+# Runs on pull requests; release.yml calls it to publish versions.
 name: Windows
 
 on:
-  push:
-    tags: ["v*"]
   pull_request:
     branches: [develop, main]
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
