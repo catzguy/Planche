@@ -1,0 +1,43 @@
+# Builds the Windows installers (NSIS .exe and .msi) of Planche.
+# Tauri downloads NSIS and WiX itself; the runner provides MSVC and WebView2.
+name: Windows
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: planche
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: planche/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: planche/src-tauri
+
+      - run: npm ci
+      - run: node scripts/i18n-keys.mjs
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - run: npm run tauri build
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: planche-windows
+          path: |
+            planche/src-tauri/target/release/bundle/nsis/*.exe
+            planche/src-tauri/target/release/bundle/msi/*.msi

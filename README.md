@@ -11,3 +11,5 @@ Lecteur de bandes dessinées, mangas, PDF et EPUB pour Windows, Linux et macOS (
 | [`docs/REVERSE_ENGINEERING.md`](docs/REVERSE_ENGINEERING.md) | Analyse de l'application Cover d'origine |
 
 **Télécharger** : [dernière version](https://github.com/catzguy/Planche/releases/latest) — installateur Windows (`.exe`, `.msi`) et paquets Linux (`.deb`, `.rpm`, AppImage).
+
+**Compilation automatique** (onglet *Actions*) : les workflows [« Windows »](.github/workflows/windows.yml) et [« Linux »](.github/workflows/linux.yml) produisent les paquets à chaque étiquette `v*` ou sur demande (*Run workflow*), dans les artefacts `planche-windows` et `planche-linux`. Le workflow Windows s'exécute aussi sur chaque pull request vers `develop` ou `main`.
