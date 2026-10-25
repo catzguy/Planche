@@ -1,7 +1,7 @@
 # Planche vs Thorium Reader 3.5.1
 
 Thorium : version installée dans `C:\Program Files\Thorium` (EDRLab, open source BSD-3). Analyse statique de `resources\app.asar` (`package.json`, bundles webpack `main.js`, `index_library.js`, `index_reader.js`, `index_pdf.js`) et de ses 863 textes d'interface (traduction française embarquée). Rien n'a été exécuté côté Thorium.
-Planche : état actuel du dépôt `cover-rebuild/planche`.
+Planche : état actuel du dépôt `Planche/planche` (https://github.com/catzguy/Planche).
 
 ## En une phrase
 
