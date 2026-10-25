@@ -1,0 +1,76 @@
+# Publishes Planche's installers to GitHub Releases.
+# - Tag v1.2.3: builds Windows and Linux, then creates the "Planche 1.2.3"
+#   release (notes generated from the merged pull requests) with all packages.
+#   The tag must match the version in planche/src-tauri/tauri.conf.json.
+# - Push to develop: replaces the "develop-latest" pre-release with packages
+#   of the latest develop commit, for testing.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type == 'branch' }}
+
+jobs:
+  # A called workflow cannot ask for more than its caller grants.
+  windows:
+    uses: ./.github/workflows/windows.yml
+    permissions:
+      contents: read
+      pull-requests: write
+
+  linux:
+    uses: ./.github/workflows/linux.yml
+    permissions:
+      contents: read
+      pull-requests: write
+
+  publish:
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: packages
+          merge-multiple: true
+
+      - name: List packages
+        run: find packages -type f -exec ls -lh {} \;
+
+      - name: Version release
+        if: github.ref_type == 'tag'
+        run: |
+          version=$(jq -r .version planche/src-tauri/tauri.conf.json)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match version $version in tauri.conf.json"
+            exit 1
+          fi
+          if ! gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "Planche $version" --generate-notes
+          fi
+          find packages -type f -print0 | xargs -0 gh release upload "$GITHUB_REF_NAME" --clobber
+
+      - name: Development pre-release
+        if: github.ref_type == 'branch'
+        run: |
+          tag=develop-latest
+          gh release delete "$tag" --yes --cleanup-tag || true
+          find packages -type f -print0 | xargs -0 gh release create "$tag" \
+            --target "$GITHUB_SHA" --prerelease --latest=false \
+            --title "Planche develop (${GITHUB_SHA::7})" \
+            --notes "Version de test compilée automatiquement depuis la branche develop (commit $GITHUB_SHA). Elle est remplacée à chaque fusion dans develop ; pour un usage normal, préférer la dernière version stable."
