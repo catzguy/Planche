@@ -5,6 +5,17 @@
 name: Android
 
 on:
+  # Pull requests that touch the Android build (it takes ~20 minutes).
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - ".github/workflows/android.yml"
+      - "planche/src-tauri/gen/android/**"
+      - "planche/src-tauri/plugins/**"
+      - "planche/src-tauri/vendor/**"
+      - "planche/src-tauri/src/storage.rs"
+      - "planche/src-tauri/Cargo.*"
+      - "planche/src-tauri/tauri.conf.json"
   workflow_dispatch:
   workflow_call:
 
