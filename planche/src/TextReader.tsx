@@ -24,6 +24,7 @@ import {
   TtsBar,
 } from "./Panels";
 import { TypographyForm } from "./Preferences";
+import { isAndroid } from "./platform";
 import { printHtml } from "./print";
 import { defaultTypography, Settings, themeColors, Typography } from "./settings";
 import { useShortcuts } from "./shortcuts";
@@ -672,12 +673,16 @@ export function TextReader({ book, startPosition, settings, onSettings, siblings
         <button className={panel === "settings" ? "on" : ""} aria-pressed={!!(panel === "settings")} onClick={() => setPanel(panel === "settings" ? null : "settings")} title={t("action.reader.settings")} aria-label={t("action.reader.settings")}>
           Aa
         </button>
-        <button onClick={() => setPrinting(true)} title={t("action.reader.print")} aria-label={t("action.reader.print")}>
-          🖶
-        </button>
-        <button onClick={toggleFullscreen} title={t("action.app.fullscreen")} aria-label={t("action.app.fullscreen")}>
-          ⛶
-        </button>
+        {!isAndroid && (
+          <>
+            <button onClick={() => setPrinting(true)} title={t("action.reader.print")} aria-label={t("action.reader.print")}>
+              🖶
+            </button>
+            <button onClick={toggleFullscreen} title={t("action.app.fullscreen")} aria-label={t("action.app.fullscreen")}>
+              ⛶
+            </button>
+          </>
+        )}
       </div>
 
       <div className={`reader-bar bottom ${controls ? "visible" : ""}`}>

@@ -6,6 +6,8 @@
 #   of the latest develop commit, for testing.
 # - Tag v1.2.3, when the Store is configured: also submits the MSIX to the
 #   Microsoft Store.
+# - Android: the signed APK goes to the GitHub release; on a tag, the AAB goes
+#   to Google Play when GOOGLE_PLAY_TRACK is set (docs/ANDROID.md).
 name: Release
 
 on:
@@ -35,8 +37,12 @@ jobs:
       contents: read
       pull-requests: write
 
+  android:
+    uses: ./.github/workflows/android.yml
+    secrets: inherit
+
   publish:
-    needs: [windows, linux]
+    needs: [windows, linux, android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -56,6 +62,15 @@ jobs:
         with:
           name: planche-linux
           path: packages
+
+      # The APK installs directly; the AAB only serves Google Play.
+      - uses: actions/download-artifact@v8
+        with:
+          name: planche-android
+          path: android
+
+      - name: Android APK
+        run: cp android/*.apk packages/
 
       - name: List packages
         run: find packages -type f -exec ls -lh {} \;
@@ -107,3 +122,25 @@ jobs:
         run: |
           $package = Get-ChildItem msix\*.msix | Select-Object -First 1
           msstore publish $package.FullName --appId "${{ vars.MSSTORE_PRODUCT_ID }}"
+
+  # Uploads the AAB of a version to Google Play, on the GOOGLE_PLAY_TRACK track
+  # (internal, alpha, beta or production), with the service account secret of
+  # the google-play environment (docs/ANDROID.md); skipped when the variable is unset.
+  play:
+    needs: [android, publish]
+    if: github.ref_type == 'tag' && vars.GOOGLE_PLAY_TRACK != ''
+    runs-on: ubuntu-latest
+    environment: google-play
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: planche-android
+          path: android
+
+      - uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.planche.reader
+          releaseFiles: android/*.aab
+          track: ${{ vars.GOOGLE_PLAY_TRACK }}
+          status: ${{ vars.GOOGLE_PLAY_STATUS || 'completed' }}
