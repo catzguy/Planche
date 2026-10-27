@@ -2,10 +2,9 @@
 //! root of CBZ/CBR/CB7/CBT archives or image folders) and, for EPUBs, the OPF
 //! package document (Dublin Core + EPUB 3 collections / Calibre series).
 
-use crate::book;
+use crate::{book, storage};
 use anyhow::{anyhow, Result};
 use regex::Regex;
-use std::fs::{self, File};
 use std::io::Read;
 use std::path::Path;
 
@@ -36,13 +35,13 @@ pub fn read(path: &Path, kind: &str) -> Result<Meta> {
     let xml = match book::sniff(path, kind).as_str() {
         "epub" => return read_epub(path),
         "pdf" => return Ok(Meta::default()),
-        "folder" => fs::read_dir(path)?
-            .flatten()
-            .find(|e| is_comicinfo(&e.file_name().to_string_lossy()))
-            .map(|e| fs::read_to_string(e.path()))
+        "folder" => storage::list(path)?
+            .into_iter()
+            .find(|e| is_comicinfo(&e.name) && e.size <= MAX_XML)
+            .map(|e| storage::read(&e.path).map(|b| String::from_utf8_lossy(&b).into_owned()))
             .transpose()?,
         "zip" => {
-            let mut zip = zip::ZipArchive::new(File::open(path)?)?;
+            let mut zip = zip::ZipArchive::new(storage::open(path)?)?;
             let name = shallowest(zip.file_names().filter_map(|n| n.ok().map(|n| n.into_owned())));
             match name {
                 Some(n) => Some(read_limited(zip.by_name(&n)?)?),
@@ -50,7 +49,10 @@ pub fn read(path: &Path, kind: &str) -> Result<Meta> {
             }
         }
         "rar" => {
-            let mut archive = unrar::Archive::new(path).open_for_processing().map_err(|e| anyhow!("rar: {e}"))?;
+            let file = storage::open(path)?;
+            let mut archive = unrar::Archive::new(&storage::native_path(path, &file))
+                .open_for_processing()
+                .map_err(|e| anyhow!("rar: {e}"))?;
             let mut found = None;
             while let Some(header) = archive.read_header().map_err(|e| anyhow!("rar: {e}"))? {
                 if header.entry().is_file()
@@ -66,7 +68,7 @@ pub fn read(path: &Path, kind: &str) -> Result<Meta> {
             found
         }
         "7z" => {
-            let mut reader = sevenz_rust2::ArchiveReader::open(path, sevenz_rust2::Password::empty())
+            let mut reader = sevenz_rust2::ArchiveReader::new(storage::open(path)?, sevenz_rust2::Password::empty())
                 .map_err(|e| anyhow!("7z: {e}"))?;
             let name = shallowest(
                 reader.archive().files.iter().filter(|f| !f.is_directory() && f.size() <= MAX_XML).map(|f| f.name().to_owned()),
@@ -78,7 +80,7 @@ pub fn read(path: &Path, kind: &str) -> Result<Meta> {
         }
         "tar" => {
             let mut found = None;
-            for entry in tar::Archive::new(File::open(path)?).entries()? {
+            for entry in tar::Archive::new(storage::open(path)?).entries()? {
                 let entry = entry?;
                 if entry.size() <= MAX_XML && is_comicinfo(&entry.path()?.to_string_lossy()) {
                     found = Some(read_limited(entry)?);
@@ -166,7 +168,7 @@ pub fn parse_comicinfo(xml: &str) -> Meta {
 /// Dublin Core title/creators/date, plus the series from either an EPUB 3
 /// `belongs-to-collection` or Calibre's `calibre:series` meta.
 fn read_epub(path: &Path) -> Result<Meta> {
-    let mut zip = zip::ZipArchive::new(File::open(path)?)?;
+    let mut zip = zip::ZipArchive::new(storage::open(path)?)?;
     let container = read_limited(zip.by_name("META-INF/container.xml")?)?;
     let opf_path = Regex::new(r#"full-path\s*=\s*"([^"]+)""#)?
         .captures(&container)
@@ -179,7 +181,7 @@ fn read_epub(path: &Path) -> Result<Meta> {
 /// Cover image of an EPUB (EPUB 3 `cover-image` item or EPUB 2
 /// `<meta name="cover">`), used as thumbnail for text EPUBs.
 pub fn epub_cover(path: &Path) -> Result<Vec<u8>> {
-    let mut zip = zip::ZipArchive::new(File::open(path)?)?;
+    let mut zip = zip::ZipArchive::new(storage::open(path)?)?;
     let container = read_limited(zip.by_name("META-INF/container.xml")?)?;
     let opf_path = Regex::new(r#"full-path\s*=\s*"([^"]+)""#)?
         .captures(&container)

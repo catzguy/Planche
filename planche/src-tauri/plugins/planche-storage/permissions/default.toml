@@ -1,0 +1,5 @@
+"$schema" = "schemas/schema.json"
+
+[default]
+description = "Android pickers used by Planche: library folder, book file, export destination."
+permissions = ["allow-pick-folder", "allow-pick-file", "allow-save-document"]

@@ -3,6 +3,7 @@ mod db;
 mod meta;
 mod opds;
 mod scan;
+mod storage;
 mod thumbs;
 mod vault;
 
@@ -78,7 +79,7 @@ impl AppState {
 fn book_file_arg<I: IntoIterator<Item = String>>(args: I, cwd: &Path) -> Option<String> {
     args.into_iter().skip(1).find_map(|a| {
         let p = cwd.join(&a);
-        (p.is_file() && scan::book_kind(&p).is_some()).then(|| p.to_string_lossy().into_owned())
+        (p.is_file() && scan::book_kind(&a).is_some()).then(|| p.to_string_lossy().into_owned())
     })
 }
 
@@ -89,8 +90,7 @@ fn get_library(state: State<Arc<AppState>>) -> Res<db::Library> {
 
 #[tauri::command(async)]
 fn add_root(state: State<'_, Arc<AppState>>, path: String) -> Res<()> {
-    let p = PathBuf::from(&path);
-    if !p.is_dir() {
+    if !storage::is_dir(Path::new(&path)) {
         return Err("Dossier introuvable ou inaccessible".into());
     }
     let id = {
@@ -238,8 +238,9 @@ async fn opds_download(
     state.wake_thumbnails();
     let _ = app.emit("library-changed", ());
     let p = path.to_string_lossy().into_owned();
-    let kind = scan::book_kind(&path).unwrap_or("zip");
-    db::open_path(&state.db.lock().unwrap(), &p, kind, &scan::display_name(&path)).map_err(err)
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let kind = scan::book_kind(&name).unwrap_or("zip");
+    db::open_path(&state.db.lock().unwrap(), &p, kind, &scan::display_name(&name, false)).map_err(err)
 }
 
 /// `planche://localhost/opds-img/{catalog}?u={url}`: covers behind the catalog's login.
@@ -346,13 +347,14 @@ fn set_manga(state: State<Arc<AppState>>, ids: Vec<String>, value: Option<bool>)
 }
 
 /// Opens a file from outside the library (dialog, drag & drop, file
-/// association) and returns the book id to read.
+/// association, Android picker) and returns the book id to read.
 #[tauri::command]
 fn open_file(state: State<Arc<AppState>>, path: String) -> Res<String> {
-    let p = PathBuf::from(&path);
-    let kind = if p.is_dir() { Some("folder") } else { scan::book_kind(&p) };
-    let kind = kind.filter(|_| p.exists()).ok_or("Format non pris en charge ou fichier introuvable")?;
-    db::open_path(&state.db.lock().unwrap(), &path, kind, &scan::display_name(&p)).map_err(err)
+    let entry = storage::stat(Path::new(&path)).ok_or("Fichier introuvable")?;
+    let kind = if entry.is_dir { Some("folder") } else { scan::book_kind(&entry.name) };
+    let kind = kind.ok_or("Format non pris en charge")?;
+    let name = scan::display_name(&entry.name, entry.is_dir);
+    db::open_path(&state.db.lock().unwrap(), &path, kind, &name).map_err(err)
 }
 
 /// Shows the system "Open with" chooser for a file Planche cannot read (text
@@ -455,7 +457,7 @@ fn serve(state: &AppState, path: &str) -> Result<(Vec<u8>, String), (StatusCode,
             let b = db::book(&state.db.lock().unwrap(), id)
                 .map_err(|e| not_found(err(e)))?
                 .ok_or_else(|| not_found("book not found".into()))?;
-            let bytes = std::fs::read(&b.path).map_err(|e| not_found(err(e)))?;
+            let bytes = storage::read(Path::new(&b.path)).map_err(|e| not_found(err(e)))?;
             let mime = if b.kind == "epub" { "application/epub+zip" } else { "application/pdf" };
             Ok((bytes, mime.into()))
         }
@@ -480,6 +482,7 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_planche_storage::init())
         .register_asynchronous_uri_scheme_protocol("planche", |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             let path = request.uri().path().to_owned();

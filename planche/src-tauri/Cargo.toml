@@ -27,7 +27,6 @@ zip = { version = "9.1.0", default-features = false, features = ["deflate", "def
 unrar = "0.5.8"
 sevenz-rust2 = "0.24.1"
 tar = "0.4.46"
-walkdir = "2.5.0"
 natord = "1.0.9"
 regex = "1.13.1"
 anyhow = "1.0.104"
@@ -37,9 +36,21 @@ tauri-plugin-dialog = "2.8.3"
 futures-util = "0.3.34"
 percent-encoding = "2.3.2"
 url = "2.5.8"
-reqwest = { version = "0.13.5", default-features = false, features = ["native-tls", "stream", "http2"] }
 keyring = { version = "4.2.0", features = ["apple-native-keyring-store"] }
 chacha20poly1305 = "0.11.0"
+tauri-plugin-planche-storage = { path = "plugins/planche-storage" }
+
+# TLS from the system on the desktop; on Android, rustls with Mozilla's roots
+# (no OpenSSL to link against there).
+[target.'cfg(not(target_os = "android"))'.dependencies]
+reqwest = { version = "0.13.5", default-features = false, features = ["native-tls", "stream", "http2"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "stream", "http2"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+webpki-root-certs = "1"
+jni = "0.21"
+ndk-context = "0.1"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
@@ -52,3 +63,7 @@ strip = true
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2.5.4"
+
+# unrar_sys with its build script fixed for cross-compilation (vendor/unrar_sys/build.rs).
+[patch.crates-io]
+unrar_sys = { path = "vendor/unrar_sys" }

@@ -2,7 +2,7 @@
 //! discovered by a scan. PDFs are handled by the front-end (pdf.js).
 
 use crate::scan::is_image;
-use crate::{book, db, meta, AppState};
+use crate::{book, db, meta, storage, AppState};
 use anyhow::{anyhow, bail, Result};
 use image::ImageFormat;
 use std::io::Cursor;
@@ -23,6 +23,8 @@ fn cover_and_count(state: &AppState, path: &Path, kind: &str, id: &str) -> Resul
     };
     match book::sniff(path, kind).as_str() {
         "rar" => {
+            let file = storage::open(path)?;
+            let path = &storage::native_path(path, &file);
             let names = sorted(
                 unrar::Archive::new(path)
                     .open_for_listing()
@@ -47,7 +49,7 @@ fn cover_and_count(state: &AppState, path: &Path, kind: &str, id: &str) -> Resul
             bail!("rar: first page not found")
         }
         "7z" => {
-            let mut reader = sevenz_rust2::ArchiveReader::open(path, sevenz_rust2::Password::empty())
+            let mut reader = sevenz_rust2::ArchiveReader::new(storage::open(path)?, sevenz_rust2::Password::empty())
                 .map_err(|e| anyhow!("7z: {e}"))?;
             let names = sorted(
                 reader.archive().files.iter().filter(|f| !f.is_directory()).map(|f| f.name().to_owned()).collect(),

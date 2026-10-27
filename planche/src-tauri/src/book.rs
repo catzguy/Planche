@@ -3,6 +3,7 @@
 //! they do not support cheap random access.
 
 use crate::scan::is_image;
+use crate::storage;
 use anyhow::{anyhow, bail, Context, Result};
 use regex::Regex;
 use std::collections::HashSet;
@@ -10,7 +11,6 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use walkdir::WalkDir;
 
 const MAX_CACHED_BOOKS: usize = 4;
 
@@ -19,12 +19,13 @@ pub const TEXT_EPUB: &str = "EPUB texte : Planche ne lit que les EPUB composés 
 
 pub enum Source {
     Zip(Mutex<zip::ZipArchive<File>>),
-    Dir(PathBuf),
+    /// One file per page (image folder, extracted archive).
+    Files(Vec<PathBuf>),
 }
 
 pub struct OpenBook {
     pub source: Source,
-    /// Entry names (zip) or paths relative to the directory (dir).
+    /// Entry names (zip) or paths relative to the folder (files).
     pub pages: Vec<String>,
 }
 
@@ -46,7 +47,7 @@ impl OpenBook {
                 }
                 Ok(buf)
             }
-            Source::Dir(dir) => Ok(fs::read(dir.join(name))?),
+            Source::Files(files) => Ok(storage::read(&files[index])?),
         }
     }
 }
@@ -70,7 +71,7 @@ fn natural_sort(names: &mut [String]) {
 /// mislabelled (a .cbr that is actually a zip, and the reverse).
 pub fn sniff(path: &Path, declared: &str) -> String {
     let mut head = [0u8; 8];
-    let n = File::open(path).and_then(|mut f| f.read(&mut head)).unwrap_or(0);
+    let n = storage::open(path).and_then(|mut f| f.read(&mut head)).unwrap_or(0);
     let head = &head[..n];
     if head.starts_with(b"PK\x03\x04") {
         if declared == "epub" { "epub" } else { "zip" }.into()
@@ -85,38 +86,47 @@ pub fn sniff(path: &Path, declared: &str) -> String {
 
 pub fn open(path: &Path, kind: &str, cache_dir: &Path, book_id: &str) -> Result<OpenBook> {
     match sniff(path, kind).as_str() {
-        "folder" => open_dir(path.to_path_buf()),
+        "folder" => open_dir(path),
         "zip" => open_zip(path, false),
         "epub" => open_zip(path, true),
         "rar" | "7z" | "tar" => {
             let dest = extract_cached(path, &sniff(path, kind), cache_dir, book_id)?;
-            open_dir(dest)
+            open_dir(&dest)
         }
         "pdf" => bail!("PDF books are rendered by the front-end"),
         other => bail!("unsupported book kind {other}"),
     }
 }
 
-fn open_dir(dir: PathBuf) -> Result<OpenBook> {
-    let mut pages: Vec<String> = WalkDir::new(&dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .filter_map(|e| {
-            let rel = e.path().strip_prefix(&dir).ok()?.to_string_lossy().replace('\\', "/");
-            (is_image(&rel) && !rel.split('/').any(|c| c.starts_with('.') || c == "__MACOSX"))
-                .then_some(rel)
-        })
-        .collect();
-    natural_sort(&mut pages);
-    if pages.is_empty() {
+/// Images under `dir` (recursively), as (path relative to `dir`, file).
+fn images_under(dir: &Path, prefix: &str, out: &mut Vec<(String, PathBuf)>) -> Result<()> {
+    for e in storage::list(dir)? {
+        if e.name.starts_with('.') || e.name == "__MACOSX" {
+            continue;
+        }
+        let rel = format!("{prefix}{}", e.name);
+        if e.is_dir {
+            images_under(&e.path, &format!("{rel}/"), out)?;
+        } else if is_image(&rel) {
+            out.push((rel, e.path));
+        }
+    }
+    Ok(())
+}
+
+fn open_dir(dir: &Path) -> Result<OpenBook> {
+    let mut images = Vec::new();
+    images_under(dir, "", &mut images)?;
+    images.sort_by(|a, b| natord::compare_ignore_case(&a.0, &b.0));
+    if images.is_empty() {
         bail!("no images found");
     }
-    Ok(OpenBook { source: Source::Dir(dir), pages })
+    let (pages, files) = images.into_iter().unzip();
+    Ok(OpenBook { source: Source::Files(files), pages })
 }
 
 fn open_zip(path: &Path, epub: bool) -> Result<OpenBook> {
-    let mut zip = zip::ZipArchive::new(File::open(path)?).context("invalid zip archive")?;
+    let mut zip = zip::ZipArchive::new(storage::open(path)?).context("invalid zip archive")?;
     let spine = if epub { epub_spine_images(&mut zip) } else { None };
     if let Some(spine) = &spine {
         // A novel (even an illustrated one) has real text between its images:
@@ -299,7 +309,9 @@ impl Extractor<'_> {
 }
 
 fn extract_rar(path: &Path, sink: &mut Extractor) -> Result<()> {
-    let mut archive = unrar::Archive::new(path).open_for_processing().map_err(|e| anyhow!("rar: {e}"))?;
+    let file = storage::open(path)?;
+    let mut archive =
+        unrar::Archive::new(&storage::native_path(path, &file)).open_for_processing().map_err(|e| anyhow!("rar: {e}"))?;
     let mut count = 0;
     while let Some(header) = archive.read_header().map_err(|e| anyhow!("rar: {e}"))? {
         count += 1;
@@ -329,7 +341,7 @@ fn extract_rar(path: &Path, sink: &mut Extractor) -> Result<()> {
 fn extract_7z(path: &Path, sink: &mut Extractor) -> Result<()> {
     let mut count = 0;
     let mut failure: Option<anyhow::Error> = None;
-    sevenz_rust2::decompress_with_extract_fn(File::open(path)?, sink.dest, |entry, reader, _| {
+    sevenz_rust2::decompress_with_extract_fn(storage::open(path)?, sink.dest, |entry, reader, _| {
         count += 1;
         let step = (|| -> Result<()> {
             if count > MAX_ENTRIES {
@@ -354,7 +366,7 @@ fn extract_7z(path: &Path, sink: &mut Extractor) -> Result<()> {
 }
 
 fn extract_tar(path: &Path, sink: &mut Extractor) -> Result<()> {
-    let mut archive = tar::Archive::new(File::open(path)?);
+    let mut archive = tar::Archive::new(storage::open(path)?);
     for (i, entry) in archive.entries()?.enumerate() {
         if i >= MAX_ENTRIES {
             bail!("too many entries");

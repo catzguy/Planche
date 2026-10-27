@@ -7,6 +7,7 @@ import { Settings, SortMode } from "./settings";
 import { useShortcuts } from "./shortcuts";
 import { CatalogBrowser, CatalogDialog } from "./Catalogs";
 import { Catalog, opdsApi } from "./opds";
+import { isAndroid, pickFile, pickFolder } from "./platform";
 
 export type SmartView =
   | "library"
@@ -102,6 +103,14 @@ interface Menu {
   books: Book[];
 }
 
+/** Folder name of a library root: last path component, or of an Android
+ * document URI (".../document/primary%3AComics%2FManga" → "Manga"). */
+const folderLabel = (path: string) => {
+  const last = path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+  if (!path.startsWith("content://")) return last;
+  return decodeURIComponent(last).split(/[:/]/).filter(Boolean).pop() ?? last;
+};
+
 export function Library(props: Props) {
   const { lib, settings, onSettings, shelfId, view, onNavigate, onOpenBook, onOpenFile, onChanged } = props;
   const [query, setQuery] = useState("");
@@ -111,6 +120,7 @@ export function Library(props: Props) {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [menu, setMenu] = useState<Menu | null>(null);
+  const [drawer, setDrawer] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const [catalogs, setCatalogs] = useState<Catalog[]>([]);
   const [editing, setEditing] = useState<Catalog | "new" | null>(null);
@@ -216,15 +226,19 @@ export function Library(props: Props) {
   };
 
   const openFile = async () => {
-    const path = await open({
-      title: t("library.openFileTitle"),
-      filters: [{ name: t("library.fileFilter"), extensions: BOOK_EXTENSIONS }],
-    });
+    const path = isAndroid
+      ? (await pickFile())?.path
+      : await open({
+          title: t("library.openFileTitle"),
+          filters: [{ name: t("library.fileFilter"), extensions: BOOK_EXTENSIONS }],
+        });
     if (typeof path === "string") onOpenFile(path);
   };
 
   const addFolder = async () => {
-    const path = await open({ directory: true, title: t("library.chooseFolder") });
+    const path = isAndroid
+      ? (await pickFolder())?.path
+      : await open({ directory: true, title: t("library.chooseFolder") });
     if (typeof path === "string") await run(t("library.scanning"), () => api.addRoot(path));
   };
 
@@ -425,11 +439,13 @@ export function Library(props: Props) {
     ) : null;
 
   return (
-    <div className="library" onClick={() => setMenu(null)}>
+    <div className={`library ${drawer ? "drawer-open" : ""}`} onClick={() => setMenu(null)}>
       <a className="skip-link" href="#main">
         {t("a11y.skipToContent")}
       </a>
-      <aside className="sidebar">
+      {drawer && <div className="drawer-backdrop" onClick={() => setDrawer(false)} />}
+      {/* On narrow screens the sidebar is a drawer, closed by any of its buttons. */}
+      <aside className="sidebar" onClick={(e) => (e.target as HTMLElement).closest("button") && setDrawer(false)}>
         <div className="brand">Planche</div>
         <nav aria-label={t("a11y.views")}>
           {smartViews.map((v) => (
@@ -473,9 +489,9 @@ export function Library(props: Props) {
         <div className="section">{t("library.folders")}</div>
         <div className="roots">
           {lib.roots.map((r) => (
-            <div key={r.id} className="root" title={r.path}>
-              <span>{r.path.split(/[\\/]/).filter(Boolean).pop()}</span>
-              <button className="ghost" onClick={() => removeRoot(r.id, r.path)} title={t("library.removeFolder")} aria-label={t("library.removeFolder")}>
+            <div key={r.id} className="root" title={folderLabel(r.path)}>
+              <span>{folderLabel(r.path)}</span>
+              <button className="ghost" onClick={() => removeRoot(r.id, folderLabel(r.path))} title={t("library.removeFolder")} aria-label={t("library.removeFolder")}>
                 ✕
               </button>
             </div>
@@ -495,6 +511,14 @@ export function Library(props: Props) {
 
       <main id="main" tabIndex={-1}>
         <header className="toolbar">
+          <button
+            className="ghost menu-toggle"
+            onClick={(e) => (e.stopPropagation(), setDrawer((d) => !d))}
+            aria-expanded={drawer}
+            aria-label={t("a11y.views")}
+          >
+            ☰
+          </button>
           <div className="crumbs">
             {query ? (
               <span>{t("library.searchResults")}</span>
