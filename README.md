@@ -1,5 +1,7 @@
 # Planche
 
+[![CodeQL](https://github.com/catzguy/Planche/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/catzguy/Planche/actions/workflows/github-code-scanning/codeql)
+
 Lecteur de bandes dessinées, mangas, PDF et EPUB pour Windows, Linux, macOS et Android (Tauri : Rust + React), avec annotations, lecture à voix haute, catalogues OPDS, 27 langues d'interface et une bibliothèque chiffrée.
 
 | Dossier | Contenu |
