@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { exit, onBackButtonPress } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -9,8 +10,9 @@ import { Preferences, ShortcutsHelp } from "./Preferences";
 import { Reader } from "./Reader";
 import { TextReader } from "./TextReader";
 import { defaultSettings, loadSettings, saveSettings, Settings } from "./settings";
-import { Scope, useShortcuts } from "./shortcuts";
+import { modals, Scope, useShortcuts } from "./shortcuts";
 import { queuePdfThumbnail } from "./pdf";
+import { isAndroid } from "./platform";
 import "./App.css";
 
 type Back = { view: SmartView; shelfId: string | null };
@@ -164,6 +166,29 @@ export default function App() {
       unlisteners.forEach((u) => u.then((f) => f()));
     };
   }, [refresh, openPath]);
+
+  // Android back button: closes what is open (dialog, panel), then the reader,
+  // then goes up the library; quits only from the library's top level.
+  useEffect(() => {
+    if (!isAndroid) return;
+    const listener = onBackButtonPress(() => {
+      const { route: r, lib: l } = latest.current;
+      if (modals.open > 0 || document.querySelector(".side-panel")) {
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      } else if (r.name === "reader") {
+        refresh();
+        setRoute({ name: "library", ...r.back });
+      } else if (r.shelfId && r.view === "library") {
+        const parent = l.shelves.find((s) => s.id === r.shelfId)?.parent_id ?? null;
+        setRoute({ name: "library", view: "library", shelfId: parent });
+      } else if (r.view !== "library" || r.shelfId) {
+        setRoute({ name: "library", view: "library", shelfId: null });
+      } else {
+        void exit(0);
+      }
+    });
+    return () => void listener.then((l) => l.unregister());
+  }, [refresh]);
 
   // PDF covers are rendered here with pdf.js; other formats are handled by the backend.
   useEffect(() => {

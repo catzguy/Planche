@@ -19,6 +19,7 @@ import {
   TtsBar,
 } from "./Panels";
 import { loadPdf, PdfDoc, renderPdfPage } from "./pdf";
+import { isAndroid } from "./platform";
 import { printImages } from "./print";
 import { DIMMER_STEPS, FIT_MODES, PAGE_MODES, Settings } from "./settings";
 import { useShortcuts } from "./shortcuts";
@@ -486,7 +487,28 @@ export function Reader({ bookId, startPage, settings, onSettings, siblings, onOp
     e.deltaY > 0 ? next() : prev();
   };
 
+  // Touch: a horizontal swipe turns the page (towards the swipe, reversed in manga mode).
+  const swipeStart = useRef<{ x: number; y: number; t: number } | null>(null);
+  const swiped = useRef(false);
+  const onPointerDown = (e: React.PointerEvent) => {
+    swipeStart.current = e.pointerType === "touch" ? { x: e.clientX, y: e.clientY, t: Date.now() } : null;
+  };
+  const onPointerUp = (e: React.PointerEvent) => {
+    const s = swipeStart.current;
+    swipeStart.current = null;
+    if (!s || mode === "scroll" || zoom > 1) return;
+    const dx = e.clientX - s.x;
+    const dy = e.clientY - s.y;
+    if (Math.abs(dx) < 50 || Math.abs(dx) < 1.5 * Math.abs(dy) || Date.now() - s.t > 700) return;
+    swiped.current = true;
+    (dx < 0) !== manga ? next() : prev();
+  };
+
   const onStageClick = (e: React.MouseEvent) => {
+    if (swiped.current) {
+      swiped.current = false;
+      return;
+    }
     const x = e.clientX / window.innerWidth;
     if (mode !== "scroll" && x < 0.3) (manga ? next : prev)();
     else if (mode !== "scroll" && x > 0.7) (manga ? prev : next)();
@@ -585,7 +607,12 @@ export function Reader({ bookId, startPage, settings, onSettings, siblings, onOp
       <div
         ref={stage}
         className={`stage ${mode === "scroll" ? "scrolling" : ""}`}
+        // Keep horizontal touch moves for page swipes, unless the page is zoomed and pans.
+        style={{ touchAction: mode === "scroll" || zoom > 1 ? undefined : "pan-y pinch-zoom" }}
         onClick={onStageClick}
+        onPointerDown={onPointerDown}
+        onPointerUp={onPointerUp}
+        onPointerCancel={() => (swipeStart.current = null)}
         onWheel={onWheel}
         onScroll={onScroll}
       >
@@ -720,13 +747,17 @@ export function Reader({ bookId, startPage, settings, onSettings, siblings, onOp
         <button className={ttsState !== "idle" ? "on" : ""} aria-pressed={!!(ttsState !== "idle")} onClick={toggleTts} disabled={!isPdf} title={isPdf ? t("action.tts.playPause") : t("reader.noTextInImages")} aria-label={t("action.tts.playPause")}>
           🔊
         </button>
-        <button onClick={() => setPrinting(true)} title={t("action.reader.print")} aria-label={t("action.reader.print")}>
-          🖶
-        </button>
+        {!isAndroid && (
+          <button onClick={() => setPrinting(true)} title={t("action.reader.print")} aria-label={t("action.reader.print")}>
+            🖶
+          </button>
+        )}
         <input type="color" value={settings.background} onChange={(e) => onSettings({ background: e.target.value })} title={t("prefs.background")} aria-label={t("prefs.background")} />
-        <button onClick={toggleFullscreen} title={t("action.app.fullscreen")} aria-label={t("action.app.fullscreen")}>
-          ⛶
-        </button>
+        {!isAndroid && (
+          <button onClick={toggleFullscreen} title={t("action.app.fullscreen")} aria-label={t("action.app.fullscreen")}>
+            ⛶
+          </button>
+        )}
       </div>
 
       <div className={`reader-bar bottom ${controls ? "visible" : ""}`}>

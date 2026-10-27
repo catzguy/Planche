@@ -3,8 +3,9 @@
 //! JSON feeds), cover images and downloads into the library.
 //!
 //! Passwords live in the OS credential store (Windows Credential Manager,
-//! macOS Keychain, Secret Service), never in the database, and are only sent
-//! to the catalog's own origin.
+//! macOS Keychain, Secret Service), never in the database; Android has none
+//! reachable from here, so they go to the (encrypted) database there. They
+//! are only sent to the catalog's own origin.
 
 use crate::db;
 use anyhow::{anyhow, bail, Context, Result};
@@ -40,14 +41,57 @@ pub struct Catalog {
     pub url: String,
     pub username: Option<String>,
     pub has_password: bool,
+    /// Never sent to the front-end.
+    #[serde(skip)]
+    password: Option<String>,
 }
 
-fn entry(id: &str) -> Result<keyring::Entry> {
-    keyring::Entry::new(KEYRING_SERVICE, id).map_err(|e| anyhow!("credential store: {e}"))
+#[cfg(not(target_os = "android"))]
+mod secret {
+    use super::KEYRING_SERVICE;
+    use anyhow::{anyhow, Result};
+    use rusqlite::Connection;
+
+    fn entry(id: &str) -> Result<keyring::Entry> {
+        keyring::Entry::new(KEYRING_SERVICE, id).map_err(|e| anyhow!("credential store: {e}"))
+    }
+
+    pub fn get(_: &Connection, id: &str) -> Option<String> {
+        entry(id).ok()?.get_password().ok()
+    }
+
+    pub fn set(_: &Connection, id: &str, password: &str) -> Result<()> {
+        entry(id)?.set_password(password).map_err(|e| anyhow!("credential store: {e}"))
+    }
+
+    pub fn delete(_: &Connection, id: &str) {
+        if let Ok(e) = entry(id) {
+            let _ = e.delete_credential();
+        }
+    }
 }
 
-fn password(id: &str) -> Option<String> {
-    entry(id).ok()?.get_password().ok()
+#[cfg(target_os = "android")]
+mod secret {
+    use crate::db;
+    use anyhow::Result;
+    use rusqlite::Connection;
+
+    fn key(id: &str) -> String {
+        format!("opds-password:{id}")
+    }
+
+    pub fn get(conn: &Connection, id: &str) -> Option<String> {
+        db::kv_get(conn, &key(id)).ok().flatten()
+    }
+
+    pub fn set(conn: &Connection, id: &str, password: &str) -> Result<()> {
+        db::kv_set(conn, &key(id), password)
+    }
+
+    pub fn delete(conn: &Connection, id: &str) {
+        let _ = conn.execute("DELETE FROM kv WHERE key = ?1", [key(id)]);
+    }
 }
 
 pub fn list(conn: &Connection) -> Result<Vec<Catalog>> {
@@ -57,7 +101,10 @@ pub fn list(conn: &Connection) -> Result<Vec<Catalog>> {
         .collect::<rusqlite::Result<Vec<(String, String, String, Option<String>)>>>()?;
     Ok(rows
         .into_iter()
-        .map(|(id, name, url, username)| Catalog { has_password: password(&id).is_some(), id, name, url, username })
+        .map(|(id, name, url, username)| {
+            let password = secret::get(conn, &id);
+            Catalog { has_password: password.is_some(), password, id, name, url, username }
+        })
         .collect())
 }
 
@@ -100,10 +147,8 @@ pub fn save(
         id.to_owned()
     };
     match password {
-        Some("") => {
-            let _ = entry(&id)?.delete_credential();
-        }
-        Some(p) => entry(&id)?.set_password(p).map_err(|e| anyhow!("credential store: {e}"))?,
+        Some("") => secret::delete(conn, &id),
+        Some(p) => secret::set(conn, &id, p)?,
         None => {}
     }
     Ok(id)
@@ -111,18 +156,23 @@ pub fn save(
 
 pub fn remove(conn: &Connection, id: &str) -> Result<()> {
     conn.execute("DELETE FROM opds_catalogs WHERE id = ?1", [id])?;
-    if let Ok(e) = entry(id) {
-        let _ = e.delete_credential();
-    }
+    secret::delete(conn, id);
     Ok(())
 }
 
 fn client() -> Result<reqwest::Client> {
-    Ok(reqwest::Client::builder()
+    let builder = reqwest::Client::builder()
         .user_agent(concat!("Planche/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(60 * 30))
-        .build()?)
+        .timeout(Duration::from_secs(60 * 30));
+    // Android: rustls (ring) with Mozilla's root certificates.
+    #[cfg(target_os = "android")]
+    let builder = {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let roots = webpki_root_certs::TLS_SERVER_ROOT_CERTS.iter().filter_map(|c| reqwest::Certificate::from_der(c).ok());
+        builder.tls_certs_only(roots)
+    };
+    Ok(builder.build()?)
 }
 
 /// GET with the catalog's credentials when (and only when) the target has the
@@ -134,7 +184,7 @@ async fn request(catalog: &Catalog, raw_url: &str, accept: &str) -> Result<reqwe
     let mut req = client()?.get(url.clone()).header(reqwest::header::ACCEPT, accept);
     if url.origin() == base.origin() {
         if let Some(user) = &catalog.username {
-            req = req.basic_auth(user, password(&catalog.id));
+            req = req.basic_auth(user, catalog.password.as_deref());
         }
     }
     let resp = req.send().await?;

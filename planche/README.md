@@ -19,6 +19,9 @@ Prérequis : Node 20+, Rust stable, et sous Windows les MSVC Build Tools + WebVi
 | `src-tauri/src/lib.rs` | État, commandes IPC, protocole `planche://` (pages, vignettes, fichier brut PDF/EPUB) |
 | `src-tauri/src/db.rs` | SQLite (migrations `user_version`) : `roots`, `shelves`, `books`, `standalone`, `bookmarks`, `annotations`, `kv` |
 | `src-tauri/src/scan.rs` | Scan des dossiers racine → étagères et livres, réconciliation par chemin puis par empreinte |
+| `src-tauri/src/storage.rs` | Accès aux fichiers : chemins sur ordinateur, documents `content://` du sélecteur Android (ContentResolver via JNI) |
+| `src-tauri/plugins/planche-storage` | Module Kotlin des sélecteurs Android (dossier, fichier, enregistrement) |
+| `src/platform.ts` | Différences de plateforme côté interface (sélecteurs Android, fonctions absentes) |
 | `src-tauri/src/book.rs` | Ouverture des livres à pages : ZIP/EPUB image lus en place, RAR/7z/TAR extraits en cache ; tri EPUB image / texte |
 | `src-tauri/src/meta.rs` | Métadonnées `ComicInfo.xml` et OPF, couverture des EPUB texte |
 | `src-tauri/src/thumbs.rs` | Worker de fond : pages, vignettes, métadonnées |
