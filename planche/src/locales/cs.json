@@ -98,6 +98,8 @@
   "common.go": "Přejít",
   "common.loading": "Načítání…",
   "common.save": "Uložit",
+  "errors.panelFailed": "V této části aplikace došlo k chybě.",
+  "errors.retry": "Zkusit znovu",
   "fitMode.both": "Celá stránka",
   "fitMode.height": "Výška",
   "fitMode.width": "Šířka",

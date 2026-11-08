@@ -96,6 +96,8 @@
   "common.go": "Git",
   "common.loading": "Yükleniyor…",
   "common.save": "Kaydet",
+  "errors.panelFailed": "Uygulamanın bu bölümünde bir hata oluştu.",
+  "errors.retry": "Yeniden dene",
   "fitMode.both": "Tüm sayfa",
   "fitMode.height": "Yükseklik",
   "fitMode.width": "Genişlik",

@@ -96,6 +96,8 @@
   "common.go": "Μετάβαση",
   "common.loading": "Φόρτωση…",
   "common.save": "Αποθήκευση",
+  "errors.panelFailed": "Αυτό το τμήμα της εφαρμογής αντιμετώπισε σφάλμα.",
+  "errors.retry": "Δοκιμή ξανά",
   "fitMode.both": "Ολόκληρη σελίδα",
   "fitMode.height": "Ύψος",
   "fitMode.width": "Πλάτος",

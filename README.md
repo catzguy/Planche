@@ -22,6 +22,7 @@ Lecteur de bandes dessinées, mangas, PDF et EPUB pour Windows, Linux, macOS et 
 |---|---|---|
 | [Windows](.github/workflows/windows.yml) | Chaque pull request vers `develop` ou `main` | Vérifie que tout compile (tests, langues, installateurs, paquet MSIX du Store) |
 | [Release](.github/workflows/release.yml) | Chaque fusion dans `develop` | Remplace la pré-version `develop-latest` par les paquets Windows, Linux et Android du dernier commit |
+| [Audit](.github/workflows/audit.yml) | Chaque lundi, et quand les dépendances changent | `npm audit`, `cargo audit` et contrôle du wrapper Gradle ; un nouvel avis de sécurité fait échouer le job |
 | [Release](.github/workflows/release.yml) | Étiquette `vX.Y.Z` | Crée la version « Planche X.Y.Z » avec tous les paquets et la liste des pull requests fusionnées, puis soumet le MSIX au Microsoft Store et l'AAB à Google Play (une fois configurés : [Store](docs/MICROSOFT_STORE.md), [Play](docs/ANDROID.md)) |
 
 **Publier une nouvelle version** :
@@ -29,3 +30,9 @@ Lecteur de bandes dessinées, mangas, PDF et EPUB pour Windows, Linux, macOS et 
 1. Mettre le même numéro de version dans `planche/package.json`, `planche/src-tauri/Cargo.toml` et `planche/src-tauri/tauri.conf.json`, puis fusionner ce changement.
 2. Créer l'étiquette sur le commit à publier : `git tag v0.2.0` puis `git push origin v0.2.0`, ou depuis la page *Releases > Draft a new release*.
 3. Environ 15 minutes plus tard, la version est en ligne. Si l'étiquette ne correspond pas à la version de `tauri.conf.json`, la publication s'arrête avec une erreur.
+
+## Licence et sécurité
+
+Planche est publié sous [licence MIT](LICENSE). La lecture des archives RAR repose sur la bibliothèque UnRAR (`planche/src-tauri/vendor/unrar_sys/vendor/unrar`), distribuée sous la [licence UnRAR](planche/src-tauri/vendor/unrar_sys/vendor/unrar/license.txt) : libre d'utilisation et de redistribution, mais elle interdit de s'en servir pour recréer l'algorithme de compression RAR.
+
+Pour signaler une vulnérabilité, voir [SECURITY.md](SECURITY.md).

@@ -96,6 +96,8 @@
   "common.go": "Go",
   "common.loading": "Loading…",
   "common.save": "Save",
+  "errors.panelFailed": "This part of the application ran into an error.",
+  "errors.retry": "Try again",
   "fitMode.both": "Whole page",
   "fitMode.height": "Height",
   "fitMode.width": "Width",

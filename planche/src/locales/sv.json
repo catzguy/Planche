@@ -96,6 +96,8 @@
   "common.go": "Gå",
   "common.loading": "Läser in…",
   "common.save": "Spara",
+  "errors.panelFailed": "Den här delen av programmet stötte på ett fel.",
+  "errors.retry": "Försök igen",
   "fitMode.both": "Hela sidan",
   "fitMode.height": "Höjd",
   "fitMode.width": "Bredd",

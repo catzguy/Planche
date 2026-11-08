@@ -91,10 +91,4 @@ Gravité : la probabilité et l'impact pour un lecteur qui ouvre des fichiers et
 | 8 | Toutes les actions épinglées sur un SHA complet avec leur version en commentaire (Dependabot `github-actions` les suivra) ; `toolchain: stable` explicité ; `upload.jks` et `keystore.properties` supprimés dans une étape `if: always()` juste après la compilation. | `.github/workflows/*.yml` | — |
 | 9 | `opener:default` → `opener:allow-reveal-item-in-dir`. Au passage (#10) : `pull-requests: write` retiré, secrets Partner Center passés par `env:`. | `capabilities/default.json`, workflows | — |
 
-Non corrigé dans cette passe : #11 (titres OPDS 2 non textuels), #13 (noms réservés Windows, `.part`), #14 (`overrides`, audits en CI), #15 à #17, et l'origine `Access-Control-Allow-Origin` du protocole (#12, hors type MIME des couvertures).
-
-## Priorités restantes
-
-1. **#11** : normaliser les titres/descriptions OPDS 2 et ajouter un `ErrorBoundary`.
-2. **#14** : `overrides` en `^0.8.15`, `npm audit` + `cargo audit` en CI.
-3. **#12, #13, #15–#17** au fil de l'eau.
+Les constats #10 à #17 ont été corrigés ensuite dans la même PR, à partir de l'[audit avant publication](AUDIT_OPEN_SOURCE_2026-11-08.md) (§4) : `ErrorBoundary` et titres OPDS 2 normalisés (#11), en-têtes `nosniff` et origine du protocole (#12), noms réservés Windows, caractères de format et `.part` unique (#13), `overrides` en `^0.8.15` et workflow `audit.yml` (#14), `open_with_other_app` par id (#15), verrou par livre et curseur JNI fermé (#16), liens externes neutralisés dans le cadre EPUB (#17).

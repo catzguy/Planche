@@ -11,7 +11,7 @@ use anyhow::Context;
 use book::OpenBook;
 use rusqlite::{params, Connection};
 use serde::Serialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Condvar, Mutex};
@@ -21,6 +21,13 @@ use tauri_plugin_planche_storage::Picked;
 
 /// Books kept open (zip handles / extracted dirs) for page requests.
 const OPEN_BOOKS: usize = 3;
+/// Origin of the application's own page: the only one allowed to read
+/// `planche://` responses (any page is allowed in development, where the
+/// origin is the Vite server).
+#[cfg(not(debug_assertions))]
+const APP_ORIGIN: &str = if cfg!(any(windows, target_os = "android")) { "http://tauri.localhost" } else { "tauri://localhost" };
+#[cfg(debug_assertions)]
+const APP_ORIGIN: &str = "*";
 /// Threads answering `planche://` requests at once (pages, thumbnails, covers).
 const PROTOCOL_THREADS: usize = 6;
 
@@ -29,6 +36,9 @@ pub struct AppState {
     pub cache_dir: PathBuf,
     pub thumb_dir: PathBuf,
     open: Mutex<Vec<(String, Arc<OpenBook>)>>,
+    /// One lock per book being opened: a second request for a book under
+    /// extraction waits for it instead of extracting the same archive twice.
+    opening: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     wake_thumbs: Mutex<Sender<()>>,
     initial_file: Mutex<Option<String>>,
     /// Shown once in the window: the library had to be set aside at start.
@@ -116,6 +126,8 @@ impl AppState {
     }
 
     fn opened(&self, id: &str) -> Res<Arc<OpenBook>> {
+        let lock = self.opening.lock().unwrap().entry(id.to_owned()).or_default().clone();
+        let _guard = lock.lock().unwrap();
         if let Some(b) = self.open.lock().unwrap().iter().find(|(k, _)| k == id) {
             return Ok(b.1.clone());
         }
@@ -685,12 +697,15 @@ pub fn run() {
                 let resp = match result {
                     Ok((bytes, mime)) => Response::builder()
                         .header("Content-Type", mime)
-                        .header("Access-Control-Allow-Origin", "*")
+                        .header("X-Content-Type-Options", "nosniff")
+                        .header("Access-Control-Allow-Origin", APP_ORIGIN)
                         .header("Cache-Control", "no-cache")
                         .body(bytes),
                     Err((status, msg)) => Response::builder()
                         .status(status)
-                        .header("Access-Control-Allow-Origin", "*")
+                        .header("Content-Type", "text/plain; charset=utf-8")
+                        .header("X-Content-Type-Options", "nosniff")
+                        .header("Access-Control-Allow-Origin", APP_ORIGIN)
                         .body(msg.into_bytes()),
                 };
                 responder.respond(resp.unwrap());
@@ -720,6 +735,7 @@ pub fn run() {
                 cache_dir,
                 thumb_dir,
                 open: Mutex::new(Vec::new()),
+                opening: Mutex::new(HashMap::new()),
                 wake_thumbs: Mutex::new(tx),
                 startup_notice: Mutex::new(startup_notice),
                 allowed: Mutex::new(initial_file.iter().cloned().collect()),

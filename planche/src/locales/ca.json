@@ -97,6 +97,8 @@
   "common.go": "Vés-hi",
   "common.loading": "S'està carregant…",
   "common.save": "Desa",
+  "errors.panelFailed": "Aquesta part de l'aplicació ha trobat un error.",
+  "errors.retry": "Torna-ho a provar",
   "fitMode.both": "Pàgina sencera",
   "fitMode.height": "Alçada",
   "fitMode.width": "Amplada",

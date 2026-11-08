@@ -5,6 +5,7 @@ import { ltr, t, tn } from "./i18n";
 import { Settings, SortMode } from "./settings";
 import { useShortcuts } from "./shortcuts";
 import { CatalogBrowser, CatalogDialog } from "./Catalogs";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { Catalog, opdsApi } from "./opds";
 import { pickFile, pickFolder } from "./platform";
 
@@ -579,7 +580,9 @@ export function Library(props: Props) {
         )}
 
         {view === "opds" && catalog ? (
-          <CatalogBrowser key={`${catalog.id}:${catalog.url}:${catalogVersion}`} catalog={catalog} onEdit={() => setEditing(catalog)} onOpenBook={props.onOpenBookId} />
+          <ErrorBoundary onReset={() => setCatalogVersion((v) => v + 1)}>
+            <CatalogBrowser key={`${catalog.id}:${catalog.url}:${catalogVersion}`} catalog={catalog} onEdit={() => setEditing(catalog)} onOpenBook={props.onOpenBookId} />
+          </ErrorBoundary>
         ) : listView ??
           (empty ? (
             <div className="empty">

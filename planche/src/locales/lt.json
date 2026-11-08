@@ -98,6 +98,8 @@
   "common.go": "Eiti",
   "common.loading": "Įkeliama…",
   "common.save": "Išsaugoti",
+  "errors.panelFailed": "Šioje programos dalyje įvyko klaida.",
+  "errors.retry": "Bandyti dar kartą",
   "fitMode.both": "Visas puslapis",
   "fitMode.height": "Aukštis",
   "fitMode.width": "Plotis",

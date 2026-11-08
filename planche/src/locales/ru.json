@@ -98,6 +98,8 @@
   "common.go": "Перейти",
   "common.loading": "Загрузка…",
   "common.save": "Сохранить",
+  "errors.panelFailed": "В этой части приложения произошла ошибка.",
+  "errors.retry": "Повторить",
   "fitMode.both": "Страница целиком",
   "fitMode.height": "По высоте",
   "fitMode.width": "По ширине",

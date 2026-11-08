@@ -99,6 +99,8 @@
   "common.go": "Aller",
   "common.loading": "Chargement…",
   "common.save": "Enregistrer",
+  "errors.panelFailed": "Cette partie de l'application a rencontré une erreur.",
+  "errors.retry": "Réessayer",
   "fitMode.both": "Page entière",
   "fitMode.height": "Hauteur",
   "fitMode.width": "Largeur",

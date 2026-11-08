@@ -17,14 +17,14 @@ Fait à noter : le dépôt est **déjà public** depuis sa création (vérifié 
 | S-7 | Moyenne | Clé du coffre et coffre sauvegardés ensemble (Android `allowBackup`) ; clé de secours Windows dans le dossier du coffre | `AndroidManifest.xml`, `vault.rs` | **Corrigé** PR #22 (#7) |
 | S-8 | Moyenne | Actions GitHub non épinglées dans les jobs qui tiennent la clé de signature et les secrets Store/Play ; keystore laissée sur le runner | `.github/workflows/*` | **Corrigé** PR #22 (#8) |
 | S-9 | Faible | `opener:default` plus large que l'usage (`allow-open-url`) | `capabilities/default.json` | **Corrigé** PR #22 (#9) |
-| S-10 | Faible | Catalogue OPDS 2 avec `title`/`description` objet (titre localisé, conforme à la spec) → exception React, écran blanc, pas d'`ErrorBoundary` | `opds.ts:176-189`, `Catalogs.tsx`, `Library.tsx:582` | **Ouvert** → §4.1 |
-| S-11 | Faible | Protocole `planche://` : `Access-Control-Allow-Origin: *`, pas de `X-Content-Type-Options` | `lib.rs` (handler du protocole) | **Ouvert** → §4.2 |
-| S-12 | Faible | Noms de téléchargement : noms réservés Windows (`CON`, `NUL`…), caractères de format Unicode (U+202E) ; collision du `.part` entre deux téléchargements | `opds.rs` `sanitize`, `unique_path`, `download` | **Ouvert** → §4.3 |
-| S-13 | Faible | `overrides` npm figé sur `0.8.15` : un futur avis `@xmldom/xmldom` ne serait pas corrigé ; aucun `npm audit` / `cargo audit` en CI | `planche/package.json:28-30`, workflows | **Ouvert** → §4.4 |
-| S-14 | Faible | Fiabilité : course entre deux extractions du même livre ; `Cursor` JNI non fermé en cas d'erreur | `lib.rs` `opened`, `storage.rs:176-179` | **Ouvert** → §4.5 |
-| S-15 | Faible | epub.js laisse les liens `mailto:`/`tel:` et les liens absolus actifs dans le cadre du livre | `TextReader.tsx:152` | **Ouvert** → §4.6 |
-| S-16 | Faible | Adresse e-mail personnelle dans l'historique Git (commits antérieurs à la configuration de l'adresse `noreply`) | historique | **Ouvert** → §3 |
-| S-17 | Info | Aucune licence, aucun `SECURITY.md` (politique de signalement) | racine du dépôt | **Ouvert** → §3 |
+| S-10 | Faible | Catalogue OPDS 2 avec `title`/`description` objet (titre localisé, conforme à la spec) → exception React, écran blanc, pas d'`ErrorBoundary` | `opds.ts:176-189`, `Catalogs.tsx`, `Library.tsx:582` | **Corrigé** PR #22 (§4.1) |
+| S-11 | Faible | Protocole `planche://` : `Access-Control-Allow-Origin: *`, pas de `X-Content-Type-Options` | `lib.rs` (handler du protocole) | **Corrigé** PR #22 (§4.2) |
+| S-12 | Faible | Noms de téléchargement : noms réservés Windows (`CON`, `NUL`…), caractères de format Unicode (U+202E) ; collision du `.part` entre deux téléchargements | `opds.rs` `sanitize`, `unique_path`, `download` | **Corrigé** PR #22 (§4.3) |
+| S-13 | Faible | `overrides` npm figé sur `0.8.15` : un futur avis `@xmldom/xmldom` ne serait pas corrigé ; aucun `npm audit` / `cargo audit` en CI | `planche/package.json:28-30`, workflows | **Corrigé** PR #22 (§4.4, workflow `audit.yml`) |
+| S-14 | Faible | Fiabilité : course entre deux extractions du même livre ; `Cursor` JNI non fermé en cas d'erreur | `lib.rs` `opened`, `storage.rs:176-179` | **Corrigé** PR #22 (§4.5) |
+| S-15 | Faible | epub.js laisse les liens `mailto:`/`tel:` et les liens absolus actifs dans le cadre du livre | `TextReader.tsx:152` | **Corrigé** PR #22 (§4.6) |
+| S-16 | Faible | Adresse e-mail personnelle dans l'historique Git (commits antérieurs à la configuration de l'adresse `noreply`) | historique | **Ouvert** → §3 (réglage GitHub à faire par le propriétaire) |
+| S-17 | Info | Aucune licence, aucun `SECURITY.md` (politique de signalement) | racine du dépôt | **Corrigé** PR #22 : `LICENSE` (MIT), `SECURITY.md`, champs `license` ; reste à activer Private vulnerability reporting (§3) |
 | S-18 | Info | SSRF « côté client » par conception : un flux OPDS peut faire requêter des adresses locales par le moteur (identifiants jamais envoyés hors origine du catalogue) | `opds.rs` `check_url` | Accepté (Komga/Kavita en LAN) ; garde optionnelle §4.7 |
 | S-19 | Info | Clé et images en clair non zéroïsées en mémoire ; `panic = "abort"` ; worker pdf.js hors CSP (sans conséquence avec pdf.js 6) | divers | Documenté dans la revue, sans action |
 
@@ -92,7 +92,9 @@ Protections côté GitHub déjà actives : secret scanning, push protection, Dep
 - `README.md` ne contient ni chemin personnel ni identifiant de compte autre que le pseudonyme GitHub.
 - Dépendances vendorisées : `vendor/unrar_sys` (copie de la crate 0.5.8 avec `build.rs` modifié) — provenance documentée dans `Cargo.toml` ; conserver le texte de licence d'origine.
 
-## 4. Correctifs de code des points ouverts
+## 4. Correctifs de code des points S-10 à S-15
+
+Tous appliqués dans la PR #22 (le code ci-dessous est celui qui a été commité ; les tests `download_names_avoid_reserved_and_bidi` et `only_image_types_pass_for_covers` couvrent §4.3 et le filtre de type des couvertures).
 
 ### 4.1 S-10 — Titres OPDS 2 non textuels et absence d'`ErrorBoundary`
 - **Localisation** : `planche/src/opds.ts` lignes 176, 178, 189 (`parseJson`) ; rendu dans `planche/src/Catalogs.tsx` (`{e.title}`, `<Modal title={detail.title}>`) ; montage dans `planche/src/Library.tsx:582`.
@@ -100,7 +102,7 @@ Protections côté GitHub déjà actives : secret scanning, push protection, Dep
 - **Correctif** — `opds.ts`, ajouter un normaliseur et l'appliquer :
   ```ts
   /** Readium allows localized strings ({ "fr": "…" }); anything else than text becomes "". */
-  const text = (v: unknown): string => {
+  const str = (v: unknown): string => {
     if (typeof v === "string") return v;
     if (typeof v === "number") return String(v);
     if (v && typeof v === "object") {
@@ -112,13 +114,13 @@ Protections côté GitHub déjà actives : secret scanning, push protection, Dep
   ```
   ```ts
   // parseJson → pub()
-  id: text(p.metadata?.identifier) || String(i),
-  title: text(p.metadata?.title),
-  summary: text(p.metadata?.description),
+  id: str(p.metadata?.identifier) || String(i),
+  title: str(p.metadata?.title),
+  summary: str(p.metadata?.description),
   // navEntry
-  title: text(n.title) || n.href,
+  title: str(n.title) || n.href,
   ```
-  et, pour les groupes, `navEntry({ ...l, title: text(g.metadata?.title) }, 1000 + gi)`.
+  et, pour les groupes, `navEntry({ ...l, title: str(g.metadata?.title) }, 1000 + gi)`.
 - **Correctif** — limite d'erreur. Nouveau fichier `planche/src/ErrorBoundary.tsx` :
   ```tsx
   import { Component, type ReactNode } from "react";
@@ -136,7 +138,7 @@ Protections côté GitHub déjà actives : secret scanning, push protection, Dep
     render() {
       if (this.state.error === null) return this.props.children;
       return (
-        <div className="error-boundary" role="alert">
+        <div className="notice error" role="alert">
           <p>{t("errors.panelFailed")}</p>
           <pre>{this.state.error}</pre>
           <button onClick={() => { this.setState({ error: null }); this.props.onReset?.(); }}>{t("errors.retry")}</button>
@@ -151,7 +153,7 @@ Protections côté GitHub déjà actives : secret scanning, push protection, Dep
     <CatalogBrowser key={`${catalog.id}:${catalog.url}:${catalogVersion}`} catalog={catalog} onEdit={() => setEditing(catalog)} onOpenBook={props.onOpenBookId} />
   </ErrorBoundary>
   ```
-  Clés à ajouter dans les 27 fichiers de `src/locales` (`errors.panelFailed`, `errors.retry`) ; `scripts/i18n-keys.mjs` signale celles qui manquent.
+  Clés `errors.panelFailed` et `errors.retry` ajoutées dans les 27 fichiers de `src/locales` (`scripts/i18n-keys.mjs` : 324 clés, 0 manquante).
 
 ### 4.2 S-11 — En-têtes du protocole `planche://`
 - **Localisation** : `planche/src-tauri/src/lib.rs`, fermeture de `register_asynchronous_uri_scheme_protocol` (`Response::builder()`).
@@ -344,8 +346,8 @@ Protections côté GitHub déjà actives : secret scanning, push protection, Dep
   ```
   (la résolution DNS n'est pas vérifiée : un nom public résolu en adresse privée passe ; une garde complète demanderait un résolveur personnalisé dans reqwest.)
 
-## 5. Ordre d'application recommandé
+## 5. Ce qui reste à faire par le propriétaire du dépôt
 
-1. Publication : licence (§3, décision à prendre), `SECURITY.md`, Private vulnerability reporting, réglage « Block command line pushes that expose my email ».
-2. §4.4 (`overrides`, workflow d'audit) et §4.1 (`ErrorBoundary`) : faibles, bénéfices immédiats.
-3. §4.3, §4.2, §4.6, §4.5 au fil de l'eau ; §4.7 seulement si le besoin apparaît.
+1. GitHub > Settings > Code security : activer **Private vulnerability reporting** (le `SECURITY.md` y renvoie).
+2. GitHub > Settings > Emails : **Keep my email addresses private** et **Block command line pushes that expose my email** (S-16).
+3. §4.7 (garde contre les adresses locales) seulement si le besoin apparaît.

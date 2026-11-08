@@ -99,6 +99,8 @@
   "common.go": "Joan",
   "common.loading": "Kargatzen…",
   "common.save": "Gorde",
+  "errors.panelFailed": "Aplikazioaren zati honek errore bat izan du.",
+  "errors.retry": "Saiatu berriro",
   "fitMode.both": "Orri osoa",
   "fitMode.height": "Altuera",
   "fitMode.width": "Zabalera",

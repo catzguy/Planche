@@ -96,6 +96,8 @@
   "common.go": "செல்",
   "common.loading": "ஏற்றுகிறது…",
   "common.save": "சேமி",
+  "errors.panelFailed": "பயன்பாட்டின் இந்தப் பகுதியில் பிழை ஏற்பட்டது.",
+  "errors.retry": "மீண்டும் முயற்சிக்கவும்",
   "fitMode.both": "முழுப் பக்கம்",
   "fitMode.height": "உயரம்",
   "fitMode.width": "அகலம்",

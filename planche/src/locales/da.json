@@ -96,6 +96,8 @@
   "common.go": "Gå",
   "common.loading": "Indlæser…",
   "common.save": "Gem",
+  "errors.panelFailed": "Denne del af programmet stødte på en fejl.",
+  "errors.retry": "Prøv igen",
   "fitMode.both": "Hel side",
   "fitMode.height": "Højde",
   "fitMode.width": "Bredde",

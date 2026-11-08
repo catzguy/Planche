@@ -96,6 +96,8 @@
   "common.go": "前往",
   "common.loading": "正在加载…",
   "common.save": "保存",
+  "errors.panelFailed": "应用的这一部分出现了错误。",
+  "errors.retry": "重试",
   "fitMode.both": "整页",
   "fitMode.height": "适应高度",
   "fitMode.width": "适应宽度",

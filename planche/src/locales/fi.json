@@ -96,6 +96,8 @@
   "common.go": "Siirry",
   "common.loading": "Ladataan…",
   "common.save": "Tallenna",
+  "errors.panelFailed": "Tässä sovelluksen osassa tapahtui virhe.",
+  "errors.retry": "Yritä uudelleen",
   "fitMode.both": "Koko sivu",
   "fitMode.height": "Korkeus",
   "fitMode.width": "Leveys",

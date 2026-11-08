@@ -97,6 +97,8 @@
   "common.go": "Ir",
   "common.loading": "Cargando…",
   "common.save": "Guardar",
+  "errors.panelFailed": "Esta parte de la aplicación ha encontrado un error.",
+  "errors.retry": "Reintentar",
   "fitMode.both": "Página completa",
   "fitMode.height": "Alto",
   "fitMode.width": "Ancho",

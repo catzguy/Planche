@@ -98,6 +98,8 @@
   "common.go": "Pojdi",
   "common.loading": "Nalaganje …",
   "common.save": "Shrani",
+  "errors.panelFailed": "V tem delu aplikacije je prišlo do napake.",
+  "errors.retry": "Poskusi znova",
   "fitMode.both": "Cela stran",
   "fitMode.height": "Višina",
   "fitMode.width": "Širina",

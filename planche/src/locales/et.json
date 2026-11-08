@@ -96,6 +96,8 @@
   "common.go": "Mine",
   "common.loading": "Laadimine…",
   "common.save": "Salvesta",
+  "errors.panelFailed": "Selles rakenduse osas tekkis viga.",
+  "errors.retry": "Proovi uuesti",
   "fitMode.both": "Terve lehekülg",
   "fitMode.height": "Kõrgus",
   "fitMode.width": "Laius",

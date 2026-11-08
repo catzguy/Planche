@@ -96,6 +96,8 @@
   "common.go": "Ga",
   "common.loading": "Laden…",
   "common.save": "Opslaan",
+  "errors.panelFailed": "Dit deel van de toepassing is op een fout gestuit.",
+  "errors.retry": "Opnieuw proberen",
   "fitMode.both": "Hele pagina",
   "fitMode.height": "Hoogte",
   "fitMode.width": "Breedte",

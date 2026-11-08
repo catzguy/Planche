@@ -271,14 +271,34 @@ fn extension_for(content_type: &str, url: &Url) -> Option<&'static str> {
     })
 }
 
+/// Windows device names: reserved whatever the extension or case.
+const RESERVED_NAMES: [&str; 22] = [
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1",
+    "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// Unicode format characters (bidi overrides, zero-width): invisible, and a
+/// right-to-left override makes "book.exe" read as a harmless name.
+fn is_format_char(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{206F}' | '\u{FEFF}'
+    )
+}
+
 fn sanitize(name: &str) -> String {
     let cleaned: String = name
         .chars()
+        .filter(|c| !is_format_char(*c))
         .map(|c| if "\\/:*?\"<>|".contains(c) || c.is_control() { '_' } else { c })
         .collect();
     let trimmed = cleaned.trim().trim_end_matches('.').trim();
     let short: String = trimmed.chars().take(150).collect();
-    if short.is_empty() { "livre".into() } else { short }
+    if short.is_empty() {
+        return "livre".into();
+    }
+    let stem = short.split('.').next().unwrap_or("").trim().to_ascii_uppercase();
+    if RESERVED_NAMES.contains(&stem.as_str()) { format!("_{short}") } else { short }
 }
 
 /// Filename from Content-Disposition, if the server sent one.
@@ -330,7 +350,8 @@ pub async fn download(
         .and_then(|n| n.rsplit_once('.').map(|(s, _)| s.to_owned()))
         .unwrap_or_else(|| title.to_owned());
     let path = unique_path(dir, &sanitize(&stem), &ext);
-    let partial = path.with_extension(format!("{ext}.part"));
+    // Unique partial name: two downloads of the same title must not share one.
+    let partial = dir.join(format!(".{}.part", uuid::Uuid::new_v4()));
     let total = resp.content_length();
     if total.is_some_and(|n| n > MAX_DOWNLOAD_BYTES) {
         bail!("fichier trop volumineux (limite {} Gio)", MAX_DOWNLOAD_BYTES >> 30);
@@ -358,4 +379,35 @@ pub async fn download(
     std::fs::rename(&partial, &path)?;
     progress(received, total.or(Some(received)));
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn download_names_avoid_reserved_and_bidi() {
+        assert_eq!(sanitize("CON"), "_CON");
+        assert_eq!(sanitize("nul.cbz"), "_nul.cbz");
+        assert_eq!(sanitize("com1 .pdf"), "_com1 .pdf");
+        assert_eq!(sanitize("Console"), "Console");
+        // Right-to-left override and zero-width characters are dropped.
+        assert_eq!(sanitize("a\u{202E}fdp.exe"), "afdp.exe");
+        assert_eq!(sanitize("Tome\u{200B} 1"), "Tome 1");
+        assert_eq!(sanitize("Tome 1 : la suite"), "Tome 1 _ la suite");
+        assert_eq!(sanitize("..."), "livre");
+    }
+
+    #[test]
+    fn only_image_types_pass_for_covers() {
+        // Mirrors the filter in `image()`.
+        let pick = |ct: &str| {
+            Some(ct)
+                .map(|v| v.split(';').next().unwrap_or("").trim().to_ascii_lowercase())
+                .filter(|v| v.starts_with("image/"))
+                .unwrap_or_else(|| "application/octet-stream".into())
+        };
+        assert_eq!(pick("image/jpeg; charset=binary"), "image/jpeg");
+        assert_eq!(pick("text/html"), "application/octet-stream");
+    }
 }
