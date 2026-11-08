@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import { t } from "./i18n";
-import { isAndroid, saveDocument } from "./platform";
 
 export interface Annotation {
   id: string;
@@ -83,11 +82,10 @@ export function toW3C(list: Annotation[]) {
   };
 }
 
-/** Asks where to save (dialog run by the backend), then writes Markdown or JSON depending on the chosen extension.
- * Android's picker cannot switch formats: Markdown there. */
+/** Asks where to save (dialog run by the backend), then writes Markdown or JSON depending on the chosen extension
+ * (Android's picker cannot switch formats: Markdown there). */
 export async function exportAnnotations(list: Annotation[], baseName: string): Promise<string | null> {
   const defaultName = `${baseName.replace(/[\\/:*?"<>|]/g, "_")} - ${t("annotations.title")}.md`;
-  if (isAndroid) return (await saveDocument(defaultName, "text/markdown", toMarkdown(list)))?.name ?? null;
   return invoke<string | null>("export_annotations", {
     title: t("annotations.export"),
     defaultName,

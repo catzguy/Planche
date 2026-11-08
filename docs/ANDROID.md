@@ -30,7 +30,7 @@ Formats : CBZ, CBR, CB7, CBT, PDF, EPUB (BD et romans) et dossiers d'images, com
 | Fonction | Android |
 |---|---|
 | Accès aux fichiers | Uniquement les dossiers et fichiers choisis dans le sélecteur d'Android. |
-| Clé de la base chiffrée | Dans l'espace privé de l'application (aucune autre application ne peut le lire), à côté de la base ; Android n'offre pas de coffre accessible au moteur Rust. |
+| Clé de la base chiffrée | Dans l'espace privé de l'application (aucune autre application ne peut le lire), à côté de la base ; Android n'offre pas de coffre accessible au moteur Rust. La sauvegarde automatique Android est désactivée (`allowBackup="false"`) : clé et base ne partent pas ensemble sur Google Drive. |
 | Mots de passe OPDS | Dans la base chiffrée (sur ordinateur : coffre du système). |
 | Export des annotations | Markdown uniquement (le sélecteur d'enregistrement d'Android ne permet pas de choisir le format). |
 | Impression, plein écran | Absents (pas d'impression dans le navigateur intégré ; Android gère lui-même le plein écran). |

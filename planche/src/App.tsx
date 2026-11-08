@@ -141,18 +141,20 @@ export default function App() {
     api.takeInitialFile().then((p) => {
       if (p) openPath(p);
     });
+    api.takeStartupNotice().then((n) => {
+      if (n) setNotice(n);
+    });
     const unlisteners = [
       listen("library-changed", refresh),
       listen<string>("open-file", (e) => openPath(e.payload)),
-      // Dropped files are read; dropped folders are added to the library.
-      getCurrentWebview().onDragDropEvent(async (e) => {
-        const p = e.payload;
-        if (p.type === "enter" || p.type === "over") setDropping(true);
-        else setDropping(false);
-        if (p.type !== "drop") return;
-        const file = p.paths.find(isBookFile);
+      // Dropped files are read; dropped folders are added to the library. The
+      // paths come from the backend ("files-dropped"), which records them
+      // first; the webview event only drives the drop highlight.
+      listen<string[]>("files-dropped", async (e) => {
+        setDropping(false);
+        const file = e.payload.find(isBookFile);
         if (file) return openPath(file);
-        for (const dir of p.paths) {
+        for (const dir of e.payload) {
           try {
             await api.addRoot(dir);
           } catch (err) {
@@ -160,6 +162,9 @@ export default function App() {
           }
         }
         refresh();
+      }),
+      getCurrentWebview().onDragDropEvent((e) => {
+        setDropping(e.payload.type === "enter" || e.payload.type === "over");
       }),
     ];
     return () => {

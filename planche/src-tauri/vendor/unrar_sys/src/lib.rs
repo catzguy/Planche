@@ -65,6 +65,8 @@ pub const ERAR_UNKNOWN: c_int = 21;
 pub const ERAR_MISSING_PASSWORD: c_int = 22;
 pub const ERAR_EREFERENCE: c_int = 23;
 pub const ERAR_BAD_PASSWORD: c_int = 24;
+// Planche patch: defined by dll.hpp, missing from the original bindings.
+pub const ERAR_LARGE_DICT: c_int = 25;
 
 pub const RAR_OM_LIST: c_uint = 0;
 pub const RAR_OM_EXTRACT: c_uint = 1;

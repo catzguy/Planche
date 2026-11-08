@@ -169,15 +169,20 @@ mod android {
                 &[uri.into(), (&projection).into(), (&null).into(), (&null).into(), (&null).into()],
             )?
             .l()?;
-        let mut rows = Vec::new();
         if cursor.is_null() {
-            return Ok(rows);
+            return Ok(Vec::new());
         }
-        while env.call_method(&cursor, "moveToNext", "()Z", &[])?.z()? {
-            rows.push(env.with_local_frame(16, |env| row(env, &cursor))?);
-        }
-        env.call_method(&cursor, "close", "()V", &[])?;
-        Ok(rows)
+        // The cursor is closed whatever happens while reading it (it holds a
+        // CursorWindow that would otherwise wait for the garbage collector).
+        let result = (|| -> jni::errors::Result<Vec<T>> {
+            let mut rows = Vec::new();
+            while env.call_method(&cursor, "moveToNext", "()Z", &[])?.z()? {
+                rows.push(env.with_local_frame(16, |env| row(env, &cursor))?);
+            }
+            Ok(rows)
+        })();
+        let _ = env.call_method(&cursor, "close", "()V", &[]);
+        result
     }
 
     fn column_string(env: &mut JNIEnv, cursor: &JObject, i: i32) -> jni::errors::Result<String> {

@@ -53,8 +53,11 @@ pub fn read(path: &Path, kind: &str) -> Result<Meta> {
             let mut archive = unrar::Archive::new(&storage::native_path(path, &file))
                 .open_for_processing()
                 .map_err(|e| anyhow!("rar: {e}"))?;
+            let solid = archive.is_solid();
+            let mut budget = book::SolidBudget::default();
             let mut found = None;
             while let Some(header) = archive.read_header().map_err(|e| anyhow!("rar: {e}"))? {
+                book::check_rar_dict(header.entry())?;
                 if header.entry().is_file()
                     && header.entry().unpacked_size <= MAX_XML
                     && is_comicinfo(&header.entry().filename.to_string_lossy())
@@ -62,6 +65,9 @@ pub fn read(path: &Path, kind: &str) -> Result<Meta> {
                     let (bytes, _) = header.read().map_err(|e| anyhow!("rar: {e}"))?;
                     found = Some(String::from_utf8_lossy(&bytes).into_owned());
                     break;
+                }
+                if solid {
+                    budget.spend(header.entry().unpacked_size)?;
                 }
                 archive = header.skip().map_err(|e| anyhow!("rar: {e}"))?;
             }
@@ -74,7 +80,7 @@ pub fn read(path: &Path, kind: &str) -> Result<Meta> {
                 reader.archive().files.iter().filter(|f| !f.is_directory() && f.size() <= MAX_XML).map(|f| f.name().to_owned()),
             );
             match name {
-                Some(n) => Some(String::from_utf8_lossy(&reader.read_file(&n).map_err(|e| anyhow!("7z: {e}"))?).into_owned()),
+                Some(n) => Some(String::from_utf8_lossy(&book::read_7z_entry(&mut reader, &n)?).into_owned()),
                 None => None,
             }
         }

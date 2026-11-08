@@ -3,6 +3,8 @@ name = "planche"
 version = "0.1.0"
 description = "Lecteur de bandes dessinées, mangas, PDF et EPUB"
 authors = ["catzguy"]
+license = "MIT"
+repository = "https://github.com/catzguy/Planche"
 edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -63,7 +65,13 @@ strip = true
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2.5.4"
+# Error dialog shown before the window exists (unreadable library); same
+# version and features as tauri-plugin-dialog, so it is compiled once.
+rfd = { version = "0.16", default-features = false, features = ["common-controls-v6"] }
 
-# unrar_sys with its build script fixed for cross-compilation (vendor/unrar_sys/build.rs).
+# unrar_sys with its build script fixed for cross-compilation (vendor/unrar_sys/build.rs)
+# and UnRAR's header reading made iterative (dll.cpp); unrar without panics on
+# unknown DLL codes and with the dictionary size exposed (vendor/unrar/Cargo.toml).
 [patch.crates-io]
 unrar_sys = { path = "vendor/unrar_sys" }
+unrar = { path = "vendor/unrar" }

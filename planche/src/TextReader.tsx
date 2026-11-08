@@ -151,6 +151,16 @@ export function TextReader({ book, startPosition, settings, onSettings, siblings
         rendition.current = r;
         r.hooks.content.register((contents: any) => {
           applyCss(contents.document, typographyCss(tyRef.current));
+          // Book links: only in-book navigation stays clickable. Mail, phone and
+          // external links become plain text; the sandboxed frame must not try
+          // to leave the application.
+          for (const a of Array.from(contents.document.querySelectorAll("a[href]")) as HTMLAnchorElement[]) {
+            const href = a.getAttribute("href") ?? "";
+            if (/^(mailto|tel|sms|javascript|data|file|intent):/i.test(href) || /^[a-z][a-z0-9+.-]*:\/\//i.test(href)) {
+              a.removeAttribute("href");
+              a.removeAttribute("target");
+            }
+          }
           contents.document.documentElement.lang ||= lang();
           const frame = contents.document.defaultView?.frameElement as HTMLIFrameElement | null;
           if (frame) frame.title = bookTitle(book);

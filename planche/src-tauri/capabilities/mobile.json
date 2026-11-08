@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/mobile-schema.json",
   "identifier": "mobile",
-  "description": "Android pickers (library folder, book file, export destination) and quitting with the back button",
+  "description": "Quitting with the back button. The Android pickers (planche-storage) are driven by the Rust backend, not by the page",
   "platforms": ["android"],
   "windows": ["main"],
-  "permissions": ["planche-storage:default", "core:app:allow-exit"]
+  "permissions": ["core:app:allow-exit"]
 }

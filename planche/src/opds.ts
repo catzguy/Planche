@@ -163,6 +163,18 @@ const rels = (l: Link2) => (Array.isArray(l.rel) ? l.rel : l.rel ? [l.rel] : [])
 const names = (v: unknown): string[] =>
   !v ? [] : Array.isArray(v) ? v.flatMap(names) : typeof v === "string" ? [v] : (v as { name?: string }).name ? [(v as { name: string }).name] : [];
 
+/** Readium allows localized strings ({ "fr": "…", "en": "…" }); anything that is not text becomes "",
+ * so a feed can never hand React an object to render. */
+const str = (v: unknown): string => {
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return String(v);
+  if (v && typeof v === "object") {
+    const first = Object.values(v as Record<string, unknown>).find((x) => typeof x === "string");
+    return typeof first === "string" ? first : "";
+  }
+  return "";
+};
+
 function parseJson(body: string, base: string): Feed {
   const f = JSON.parse(body);
   const links: Link2[] = f.links ?? [];
@@ -172,10 +184,10 @@ function parseJson(body: string, base: string): Feed {
     const plinks: Link2[] = p.links ?? [];
     const images: Link2[] = p.images ?? [];
     return {
-      id: p.metadata?.identifier ?? String(i),
-      title: p.metadata?.title ?? "",
+      id: str(p.metadata?.identifier) || String(i),
+      title: str(p.metadata?.title),
       authors: names(p.metadata?.author),
-      summary: p.metadata?.description ?? "",
+      summary: str(p.metadata?.description),
       cover: abs(images[0]?.href, base),
       navHref: null,
       acquisitions: plinks
@@ -186,7 +198,7 @@ function parseJson(body: string, base: string): Feed {
   };
   const navEntry = (n: Link2, i: number): Entry => ({
     id: `nav-${i}-${n.href}`,
-    title: n.title ?? n.href,
+    title: str(n.title) || n.href,
     authors: [],
     summary: "",
     cover: null,
@@ -199,7 +211,7 @@ function parseJson(body: string, base: string): Feed {
     ...(f.publications ?? []).map(pub),
     // Groups: show their navigation and publications in order, plus a link to the full group.
     ...(f.groups ?? []).flatMap((g: any, gi: number) => [
-      ...((g.links ?? []) as Link2[]).filter((l) => rels(l).includes("self")).map((l) => navEntry({ ...l, title: g.metadata?.title }, 1000 + gi)),
+      ...((g.links ?? []) as Link2[]).filter((l) => rels(l).includes("self")).map((l) => navEntry({ ...l, title: str(g.metadata?.title) }, 1000 + gi)),
       ...(g.navigation ?? []).map((n: Link2, i: number) => navEntry(n, gi * 100 + i)),
       ...(g.publications ?? []).map(pub),
     ]),

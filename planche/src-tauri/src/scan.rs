@@ -12,6 +12,10 @@ use std::collections::HashSet;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
+/// Extensions offered by the "open a file" dialog (what `book_kind` accepts).
+#[cfg_attr(target_os = "android", allow(dead_code))]
+pub const BOOK_EXTENSIONS: [&str; 10] = ["cbz", "cbr", "cb7", "cbt", "zip", "rar", "7z", "tar", "pdf", "epub"];
+
 /// Book format from a file name (document URIs carry no usable extension).
 pub fn book_kind(name: &str) -> Option<&'static str> {
     let ext = name.rsplit_once('.')?.1.to_ascii_lowercase();

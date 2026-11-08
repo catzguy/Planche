@@ -1,0 +1,56 @@
+# Dependency audit: npm and Rust advisories, and the checksum of the committed
+# Gradle wrapper. Weekly, on lockfile changes, and on demand. A new advisory
+# fails the job; the --ignore list names the Linux/GTK advisories that have no
+# fix until Tauri moves to gtk-rs 0.20 (docs/REVUE_SECURITE_2026-11-08.md).
+name: Audit
+
+on:
+  schedule:
+    - cron: "30 5 * * 1"
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - "planche/package.json"
+      - "planche/package-lock.json"
+      - "planche/src-tauri/Cargo.toml"
+      - "planche/src-tauri/Cargo.lock"
+      - "planche/src-tauri/gen/android/gradle/**"
+      - ".github/workflows/audit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: planche
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: gradle/actions/wrapper-validation@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: planche/package-lock.json
+
+      - run: npm audit --audit-level=moderate
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+
+      - run: cargo install cargo-audit --locked
+
+      - run: >
+          cargo audit --deny warnings
+          --ignore RUSTSEC-2024-0429
+          --ignore RUSTSEC-2024-0370
+          --ignore RUSTSEC-2026-0370
+          --ignore RUSTSEC-2026-0371
+          --ignore RUSTSEC-2026-0372
+        working-directory: planche/src-tauri

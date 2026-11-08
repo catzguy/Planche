@@ -208,37 +208,47 @@ int PASCAL RARReadHeaderEx(HANDLE hArcData,struct RARHeaderDataEx *D)
   DataSet *Data=(DataSet *)hArcData;
   try
   {
-    if ((Data->HeaderSize=(int)Data->Arc.SearchBlock(HEAD_FILE))<=0)
+    // Planche patch (backport of UnRAR 7.3.x): iterate instead of recursing.
+    // RARReadHeaderEx called itself once per "split before" header in list
+    // mode, and once per merged volume, so a crafted archive exhausted the
+    // stack and killed the process.
+    for (uint RepeatCount=0;;RepeatCount++)
     {
-      if (Data->Arc.Volume && Data->Arc.GetHeaderType()==HEAD_ENDARC &&
-          Data->Arc.EndArcHead.NextVolume)
-        if (MergeArchive(Data->Arc,NULL,false,'L'))
-        {
-          Data->Arc.Seek(Data->Arc.CurBlockPos,SEEK_SET);
-          return RARReadHeaderEx(hArcData,D);
-        }
+      if (RepeatCount>0x10000)
+        return ERAR_BAD_ARCHIVE;
+      if ((Data->HeaderSize=(int)Data->Arc.SearchBlock(HEAD_FILE))<=0)
+      {
+        if (Data->Arc.Volume && Data->Arc.GetHeaderType()==HEAD_ENDARC &&
+            Data->Arc.EndArcHead.NextVolume)
+          if (MergeArchive(Data->Arc,NULL,false,'L'))
+          {
+            Data->Arc.Seek(Data->Arc.CurBlockPos,SEEK_SET);
+            continue;
+          }
+          else
+            return ERAR_EOPEN;
+
+        if (Data->Arc.BrokenHeader)
+          return ERAR_BAD_DATA;
+
+        // Might be necessary if RARSetPassword is still called instead of
+        // open callback for RAR5 archives and if password is invalid.
+        if (Data->Arc.FailedHeaderDecryption)
+          return ERAR_BAD_PASSWORD;
+
+        return ERAR_END_ARCHIVE;
+      }
+      if (Data->OpenMode==RAR_OM_LIST && Data->Arc.FileHead.SplitBefore)
+      {
+        int Code=RARProcessFile(hArcData,RAR_SKIP,NULL,NULL);
+        if (Code==0)
+          continue;
         else
-          return ERAR_EOPEN;
-
-      if (Data->Arc.BrokenHeader)
-        return ERAR_BAD_DATA;
-
-      // Might be necessary if RARSetPassword is still called instead of
-      // open callback for RAR5 archives and if password is invalid.
-      if (Data->Arc.FailedHeaderDecryption)
-        return ERAR_BAD_PASSWORD;
-      
-      return ERAR_END_ARCHIVE;
+          return Code;
+      }
+      break;
     }
     FileHeader *hd=&Data->Arc.FileHead;
-    if (Data->OpenMode==RAR_OM_LIST && hd->SplitBefore)
-    {
-      int Code=RARProcessFile(hArcData,RAR_SKIP,NULL,NULL);
-      if (Code==0)
-        return RARReadHeaderEx(hArcData,D);
-      else
-        return Code;
-    }
     wcsncpyz(D->ArcNameW,Data->Arc.FileName.c_str(),ASIZE(D->ArcNameW));
     WideToChar(D->ArcNameW,D->ArcName,ASIZE(D->ArcName));
     if (D->ArcNameEx!=nullptr)
