@@ -10,15 +10,25 @@
 use crate::db;
 use anyhow::{anyhow, bail, Context, Result};
 use futures_util::StreamExt;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use url::Url;
 
+#[cfg(not(target_os = "android"))]
 const KEYRING_SERVICE: &str = "Planche OPDS";
 const MAX_FEED_BYTES: usize = 20 * 1024 * 1024;
+const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
+const MAX_DOWNLOAD_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+/// Feeds and covers are shown while the user waits: a stalled server must not
+/// hold a request (nor a `planche://` slot) for long. Downloads may take long
+/// but must keep making progress: READ_TIMEOUT resets after every frame.
+const FEED_TIMEOUT: Duration = Duration::from_secs(120);
+const IMAGE_TIMEOUT: Duration = Duration::from_secs(60);
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60 * 30);
+const READ_TIMEOUT: Duration = Duration::from_secs(30);
 const ACCEPT_FEED: &str =
     "application/opds+json, application/atom+xml;profile=opds-catalog, application/atom+xml, application/json;q=0.9, */*;q=0.5";
 
@@ -140,10 +150,20 @@ pub fn save(
         )?;
         id
     } else {
+        // Credentials are bound to the origin they were entered for: a catalog
+        // moved to another server loses its stored password unless a new one
+        // comes with the change (the page could otherwise point a catalog at a
+        // host of its choice and have `fetch` send the password there).
+        let previous: Option<String> =
+            conn.query_row("SELECT url FROM opds_catalogs WHERE id = ?1", [id], |r| r.get(0)).optional()?;
+        let Some(previous) = previous else { bail!("catalog not found") };
         conn.execute(
             "UPDATE opds_catalogs SET name = ?2, url = ?3, username = ?4 WHERE id = ?1",
             params![id, name.trim(), url.as_str(), username],
         )?;
+        if !same_origin(&previous, &url) {
+            secret::delete(conn, id);
+        }
         id.to_owned()
     };
     match password {
@@ -152,6 +172,12 @@ pub fn save(
         None => {}
     }
     Ok(id)
+}
+
+/// Whether the stored address `previous` and `url` have the same origin
+/// (scheme, host, port); an unreadable stored address counts as a move.
+fn same_origin(previous: &str, url: &Url) -> bool {
+    check_url(previous).is_ok_and(|p| p.origin() == url.origin())
 }
 
 pub fn remove(conn: &Connection, id: &str) -> Result<()> {
@@ -164,7 +190,7 @@ fn client() -> Result<reqwest::Client> {
     let builder = reqwest::Client::builder()
         .user_agent(concat!("Planche/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(60 * 30));
+        .read_timeout(READ_TIMEOUT);
     // Android: rustls (ring) with Mozilla's root certificates.
     #[cfg(target_os = "android")]
     let builder = {
@@ -178,10 +204,10 @@ fn client() -> Result<reqwest::Client> {
 /// GET with the catalog's credentials when (and only when) the target has the
 /// same origin as the catalog. Redirects are followed by reqwest, which drops
 /// the Authorization header when the host changes.
-async fn request(catalog: &Catalog, raw_url: &str, accept: &str) -> Result<reqwest::Response> {
+async fn request(catalog: &Catalog, raw_url: &str, accept: &str, timeout: Duration) -> Result<reqwest::Response> {
     let url = check_url(raw_url)?;
     let base = check_url(&catalog.url)?;
-    let mut req = client()?.get(url.clone()).header(reqwest::header::ACCEPT, accept);
+    let mut req = client()?.get(url.clone()).timeout(timeout).header(reqwest::header::ACCEPT, accept);
     if url.origin() == base.origin() {
         if let Some(user) = &catalog.username {
             req = req.basic_auth(user, catalog.password.as_deref());
@@ -206,7 +232,7 @@ pub struct Fetched {
 }
 
 pub async fn fetch(catalog: &Catalog, url: &str) -> Result<Fetched> {
-    let resp = request(catalog, url, ACCEPT_FEED).await?;
+    let resp = request(catalog, url, ACCEPT_FEED, FEED_TIMEOUT).await?;
     let final_url = resp.url().to_string();
     let content_type = resp
         .headers()
@@ -214,23 +240,39 @@ pub async fn fetch(catalog: &Catalog, url: &str) -> Result<Fetched> {
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_owned();
-    let bytes = resp.bytes().await?;
-    if bytes.len() > MAX_FEED_BYTES {
-        bail!("feed too large");
-    }
+    let bytes = body_limited(resp, MAX_FEED_BYTES, "feed").await?;
     Ok(Fetched { url: final_url, content_type, body: String::from_utf8_lossy(&bytes).into_owned() })
 }
 
-/// Cover images, through the catalog's credentials.
+/// Reads a response body of at most `max` bytes. The declared length is
+/// checked first, then the bytes actually received: a server cannot make the
+/// app buffer an endless body.
+async fn body_limited(mut resp: reqwest::Response, max: usize, what: &str) -> Result<Vec<u8>> {
+    if resp.content_length().is_some_and(|n| n > max as u64) {
+        bail!("{what} too large");
+    }
+    let mut out = Vec::new();
+    while let Some(chunk) = resp.chunk().await? {
+        if out.len() + chunk.len() > max {
+            bail!("{what} too large");
+        }
+        out.extend_from_slice(&chunk);
+    }
+    Ok(out)
+}
+
+/// Cover images, through the catalog's credentials. Only served as an image:
+/// whatever the server claims, the bytes never get an active media type.
 pub async fn image(catalog: &Catalog, url: &str) -> Result<(Vec<u8>, String)> {
-    let resp = request(catalog, url, "image/*").await?;
+    let resp = request(catalog, url, "image/*", IMAGE_TIMEOUT).await?;
     let ct = resp
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("image/jpeg")
-        .to_owned();
-    Ok((resp.bytes().await?.to_vec(), ct))
+        .map(|v| v.split(';').next().unwrap_or("").trim().to_ascii_lowercase())
+        .filter(|v| v.starts_with("image/"))
+        .unwrap_or_else(|| "application/octet-stream".into());
+    Ok((body_limited(resp, MAX_IMAGE_BYTES, "image").await?, ct))
 }
 
 /// File extension for a download, from its media type or the URL.
@@ -253,14 +295,34 @@ fn extension_for(content_type: &str, url: &Url) -> Option<&'static str> {
     })
 }
 
+/// Windows device names: reserved whatever the extension or case.
+const RESERVED_NAMES: [&str; 22] = [
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1",
+    "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// Unicode format characters (bidi overrides, zero-width): invisible, and a
+/// right-to-left override makes "book.exe" read as a harmless name.
+fn is_format_char(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{206F}' | '\u{FEFF}'
+    )
+}
+
 fn sanitize(name: &str) -> String {
     let cleaned: String = name
         .chars()
+        .filter(|c| !is_format_char(*c))
         .map(|c| if "\\/:*?\"<>|".contains(c) || c.is_control() { '_' } else { c })
         .collect();
     let trimmed = cleaned.trim().trim_end_matches('.').trim();
     let short: String = trimmed.chars().take(150).collect();
-    if short.is_empty() { "livre".into() } else { short }
+    if short.is_empty() {
+        return "livre".into();
+    }
+    let stem = short.split('.').next().unwrap_or("").trim().to_ascii_uppercase();
+    if RESERVED_NAMES.contains(&stem.as_str()) { format!("_{short}") } else { short }
 }
 
 /// Filename from Content-Disposition, if the server sent one.
@@ -292,7 +354,7 @@ pub async fn download(
     mut progress: impl FnMut(u64, Option<u64>),
 ) -> Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
-    let resp = request(catalog, url, "*/*").await?;
+    let resp = request(catalog, url, "*/*", DOWNLOAD_TIMEOUT).await?;
     let final_url = resp.url().clone();
     let ct = resp
         .headers()
@@ -312,24 +374,86 @@ pub async fn download(
         .and_then(|n| n.rsplit_once('.').map(|(s, _)| s.to_owned()))
         .unwrap_or_else(|| title.to_owned());
     let path = unique_path(dir, &sanitize(&stem), &ext);
-    let partial = path.with_extension(format!("{ext}.part"));
+    // Unique partial name: two downloads of the same title must not share one.
+    let partial = dir.join(format!(".{}.part", uuid::Uuid::new_v4()));
     let total = resp.content_length();
-    let mut file = std::fs::File::create(&partial)?;
-    let mut received = 0u64;
-    let mut stream = resp.bytes_stream();
-    let mut last = std::time::Instant::now();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk?;
-        file.write_all(&chunk)?;
-        received += chunk.len() as u64;
-        if last.elapsed() > Duration::from_millis(200) {
-            progress(received, total);
-            last = std::time::Instant::now();
-        }
+    if total.is_some_and(|n| n > MAX_DOWNLOAD_BYTES) {
+        bail!("fichier trop volumineux (limite {} Gio)", MAX_DOWNLOAD_BYTES >> 30);
     }
-    file.flush()?;
+    let mut file = std::fs::File::create(&partial)?;
+    let result: Result<u64> = async {
+        let mut received = 0u64;
+        let mut stream = resp.bytes_stream();
+        let mut last = std::time::Instant::now();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            received += chunk.len() as u64;
+            if received > MAX_DOWNLOAD_BYTES {
+                bail!("fichier trop volumineux (limite {} Gio)", MAX_DOWNLOAD_BYTES >> 30);
+            }
+            file.write_all(&chunk)?;
+            if last.elapsed() > Duration::from_millis(200) {
+                progress(received, total);
+                last = std::time::Instant::now();
+            }
+        }
+        file.flush()?;
+        Ok(received)
+    }
+    .await;
     drop(file);
-    std::fs::rename(&partial, &path)?;
+    // Whatever stopped the download (network, timeout, full disk, rename), the
+    // partial file does not stay in the user's Documents folder.
+    let received = match result.and_then(|n| std::fs::rename(&partial, &path).map(|_| n).map_err(Into::into)) {
+        Ok(n) => n,
+        Err(e) => {
+            let _ = std::fs::remove_file(&partial);
+            return Err(e);
+        }
+    };
     progress(received, total.or(Some(received)));
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Stored credentials stay with the origin they were entered for.
+    #[test]
+    fn credentials_follow_the_origin() {
+        let url = |s: &str| Url::parse(s).unwrap();
+        assert!(same_origin("https://komga.lan:25600/opds/v1.2/catalog", &url("https://komga.lan:25600/opds/v2/catalog")));
+        assert!(same_origin("https://Komga.LAN/opds", &url("https://komga.lan:443/other")));
+        assert!(!same_origin("https://komga.lan/opds", &url("https://attacker.example/opds")));
+        assert!(!same_origin("https://komga.lan/opds", &url("http://komga.lan/opds")), "scheme");
+        assert!(!same_origin("https://komga.lan/opds", &url("https://komga.lan:8443/opds")), "port");
+        assert!(!same_origin("not a url", &url("https://komga.lan/opds")));
+    }
+
+    #[test]
+    fn download_names_avoid_reserved_and_bidi() {
+        assert_eq!(sanitize("CON"), "_CON");
+        assert_eq!(sanitize("nul.cbz"), "_nul.cbz");
+        assert_eq!(sanitize("com1 .pdf"), "_com1 .pdf");
+        assert_eq!(sanitize("Console"), "Console");
+        // Right-to-left override and zero-width characters are dropped.
+        assert_eq!(sanitize("a\u{202E}fdp.exe"), "afdp.exe");
+        assert_eq!(sanitize("Tome\u{200B} 1"), "Tome 1");
+        assert_eq!(sanitize("Tome 1 : la suite"), "Tome 1 _ la suite");
+        assert_eq!(sanitize("..."), "livre");
+    }
+
+    #[test]
+    fn only_image_types_pass_for_covers() {
+        // Mirrors the filter in `image()`.
+        let pick = |ct: &str| {
+            Some(ct)
+                .map(|v| v.split(';').next().unwrap_or("").trim().to_ascii_lowercase())
+                .filter(|v| v.starts_with("image/"))
+                .unwrap_or_else(|| "application/octet-stream".into())
+        };
+        assert_eq!(pick("image/jpeg; charset=binary"), "image/jpeg");
+        assert_eq!(pick("text/html"), "application/octet-stream");
+    }
 }

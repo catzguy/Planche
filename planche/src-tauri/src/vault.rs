@@ -25,6 +25,9 @@ const KEYRING_USER: &str = "library-database-key";
 /// Database file name used before encryption; migrated then erased.
 const LEGACY_DB: &str = "library.db";
 const VAULT_FILE: &str = "library.planche";
+/// Previous snapshot, kept so a damaged or half-written `library.planche`
+/// (power cut during the rename, disk error) loses at most one save.
+const BACKUP_FILE: &str = "library.planche.bak";
 const KEY_FILE: &str = "library.key";
 
 pub struct Vault {
@@ -159,21 +162,46 @@ fn rollback_journal(image: &mut [u8]) {
 
 impl Vault {
     /// Opens the library: an in-memory connection loaded from the encrypted
-    /// snapshot, or migrated from a legacy plaintext `library.db`. `config_dir`
-    /// holds the fallback key file when there is no credential store.
-    pub fn open(data_dir: &Path, config_dir: &Path) -> Result<(Connection, Vault)> {
-        let path = data_dir.join(VAULT_FILE);
-        let key = load_key(path.exists(), &config_dir.join(KEY_FILE))?;
-        let vault = Vault { path, cipher: XChaCha20Poly1305::new(&key) };
+    /// snapshot (or its backup), or migrated from a legacy plaintext
+    /// `library.db`. `key_dir` holds the fallback key file when there is no
+    /// credential store; a key file still at `legacy_key_dir` is moved there.
+    pub fn open(data_dir: &Path, key_dir: &Path, legacy_key_dir: Option<&Path>) -> Result<(Connection, Vault)> {
+        let key_file = key_dir.join(KEY_FILE);
+        if let Some(old) = legacy_key_dir.map(|d| d.join(KEY_FILE)).filter(|o| o != &key_file && o.exists()) {
+            if !key_file.exists() {
+                if let Some(parent) = key_file.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::rename(&old, &key_file).context("moving the database key file")?;
+            }
+        }
+        let exists = data_dir.join(VAULT_FILE).exists() || data_dir.join(BACKUP_FILE).exists();
+        let key = load_key(exists, &key_file)?;
+        Self::open_with_key(data_dir, &key)
+    }
+
+    fn open_with_key(data_dir: &Path, key: &Key) -> Result<(Connection, Vault)> {
+        let vault = Vault { path: data_dir.join(VAULT_FILE), cipher: XChaCha20Poly1305::new(key) };
         let mut conn = Connection::open_in_memory()?;
         let legacy = data_dir.join(LEGACY_DB);
-        if vault.path.exists() {
-            let mut data = vault.decrypt(&fs::read(&vault.path)?)?;
-            rollback_journal(&mut data);
-            let len = data.len();
-            conn.deserialize_read_exact(MAIN_DB, data.as_slice(), len, false)
-                .context("loading the library")?;
-        } else if legacy.exists() {
+        let backup = data_dir.join(BACKUP_FILE);
+        let mut failure: Option<anyhow::Error> = None;
+        let candidates = [vault.path.clone(), backup];
+        for file in candidates.iter().filter(|f| f.exists()) {
+            match vault.load(&mut conn, file) {
+                Ok(()) => {
+                    if failure.is_some() {
+                        eprintln!("library snapshot unreadable, loaded the previous one ({})", file.display());
+                    }
+                    return Ok((conn, vault));
+                }
+                Err(e) => failure.get_or_insert(e.context(format!("loading {}", file.display()))),
+            };
+        }
+        if let Some(e) = failure {
+            return Err(e);
+        }
+        if legacy.exists() {
             conn.restore(MAIN_DB, &legacy, None::<fn(rusqlite::backup::Progress)>)
                 .context("migrating the plaintext database")?;
             vault.save(&mut conn)?;
@@ -182,6 +210,30 @@ impl Vault {
             }
         }
         Ok((conn, vault))
+    }
+
+    fn load(&self, conn: &mut Connection, file: &Path) -> Result<()> {
+        let mut data = self.decrypt(&fs::read(file)?)?;
+        rollback_journal(&mut data);
+        let len = data.len();
+        conn.deserialize_read_exact(MAIN_DB, data.as_slice(), len, false)?;
+        Ok(())
+    }
+
+    /// Moves an unreadable snapshot (and its backup) out of the way, keeping
+    /// them for a manual recovery, so the library can start again empty.
+    /// Returns the folder they were kept in.
+    pub fn set_aside(data_dir: &Path) -> Result<PathBuf> {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        for name in [VAULT_FILE, BACKUP_FILE] {
+            let file = data_dir.join(name);
+            if file.exists() {
+                fs::rename(&file, data_dir.join(format!("{name}.corrupt-{stamp}")))?;
+            }
+        }
+        Ok(data_dir.to_path_buf())
     }
 
     fn decrypt(&self, file: &[u8]) -> Result<Vec<u8>> {
@@ -195,7 +247,8 @@ impl Vault {
             .map_err(|_| anyhow!("database decryption failed (wrong key or tampered file)"))
     }
 
-    /// Writes an encrypted snapshot atomically (temporary file, then rename).
+    /// Writes an encrypted snapshot atomically (temporary file, then rename);
+    /// the previous snapshot becomes the backup.
     pub fn save(&self, conn: &mut Connection) -> Result<()> {
         let mut plain = conn.serialize(MAIN_DB)?.to_vec();
         rollback_journal(&mut plain);
@@ -212,6 +265,10 @@ impl Vault {
             f.write_all(&nonce)?;
             f.write_all(&sealed)?;
             f.sync_all()?;
+        }
+        if self.path.exists() {
+            // Best effort: with no backup the new snapshot still replaces the old one.
+            let _ = fs::rename(&self.path, self.path.with_file_name(BACKUP_FILE));
         }
         fs::rename(&tmp, &self.path)?;
         Ok(())
@@ -256,6 +313,42 @@ mod tests {
         back.deserialize_read_exact(MAIN_DB, image.as_slice(), len, false).unwrap();
         let x: i64 = back.query_row("SELECT x FROM t", [], |r| r.get(0)).unwrap();
         assert_eq!(x, 42);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A damaged snapshot falls back to the previous save; set aside, both
+    /// are kept and the library starts empty.
+    #[test]
+    fn backup_snapshot_recovers_a_damaged_vault() {
+        let dir = std::env::temp_dir().join(format!("planche-bak-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let key = Key::generate();
+        let count = |c: &Connection| c.query_row("SELECT count(*) FROM t", [], |r| r.get::<_, i64>(0)).unwrap();
+        {
+            let (mut c, v) = Vault::open_with_key(&dir, &key).unwrap();
+            c.execute_batch("CREATE TABLE t(x); INSERT INTO t VALUES(1);").unwrap();
+            v.save(&mut c).unwrap();
+            c.execute_batch("INSERT INTO t VALUES(2);").unwrap();
+            v.save(&mut c).unwrap();
+        }
+        assert!(dir.join(BACKUP_FILE).exists());
+        let (c, _) = Vault::open_with_key(&dir, &key).unwrap();
+        assert_eq!(count(&c), 2);
+        // Truncated current snapshot: the backup (one save behind) is used.
+        let vault_file = dir.join(VAULT_FILE);
+        let bytes = fs::read(&vault_file).unwrap();
+        fs::write(&vault_file, &bytes[..bytes.len() / 2]).unwrap();
+        let (c, _) = Vault::open_with_key(&dir, &key).unwrap();
+        assert_eq!(count(&c), 1);
+        // Both damaged: an error, never a silent fresh start.
+        fs::write(dir.join(BACKUP_FILE), b"garbage").unwrap();
+        assert!(Vault::open_with_key(&dir, &key).is_err());
+        Vault::set_aside(&dir).unwrap();
+        assert!(!vault_file.exists() && !dir.join(BACKUP_FILE).exists());
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 2, "set-aside files are kept");
+        let (c, _) = Vault::open_with_key(&dir, &key).unwrap();
+        assert!(c.query_row("SELECT count(*) FROM t", [], |r| r.get::<_, i64>(0)).is_err(), "fresh library");
         let _ = fs::remove_dir_all(&dir);
     }
 

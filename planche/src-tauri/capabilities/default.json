@@ -1,14 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
+  "description": "Capability for the main window: file dialogs run in the backend (pick_file, pick_folder, export_annotations), so the page needs no dialog permission; the opener only reveals a book in the file manager",
   "windows": [
     "main"
   ],
   "permissions": [
     "core:default",
-    "opener:default",
-    "dialog:allow-open",
+    "opener:allow-reveal-item-in-dir",
     "core:window:allow-set-fullscreen",
     "core:window:allow-is-fullscreen"
   ]

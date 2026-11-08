@@ -1,0 +1,28 @@
+# Copy of the `unrar` crate 0.5.8 (crates.io, MIT OR Apache-2.0), used through
+# [patch.crates-io] in planche/src-tauri/Cargo.toml. Planche changes, all in
+# src/ and marked "Planche patch":
+# - an unknown return code of the DLL (ERAR_LARGE_DICT, future codes) is an
+#   error, not an `unwrap()` panic that aborts the whole application;
+# - FileHeader exposes the dictionary size, so callers refuse giant ones
+#   before UnRAR allocates the window.
+[package]
+edition = "2021"
+name = "unrar"
+version = "0.5.8"
+authors = [
+    "Danyel Bayraktar <rust@danyel.io>",
+    "vjoki <vjoki@zv.fi>",
+]
+description = "list and extract RAR archives"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/muja/unrar.rs"
+
+[lib]
+name = "unrar"
+path = "src/lib.rs"
+
+[dependencies]
+bitflags = "2"
+regex = "1"
+unrar_sys = "0.5"
+widestring = "1"

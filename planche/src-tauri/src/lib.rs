@@ -11,33 +11,102 @@ use anyhow::Context;
 use book::OpenBook;
 use rusqlite::{params, Connection};
 use serde::Serialize;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use tauri::http::{Response, StatusCode};
-use tauri::{Emitter, Manager, State};
+use tauri::{DragDropEvent, Emitter, Manager, State, WindowEvent};
+use tauri_plugin_planche_storage::Picked;
 
 /// Books kept open (zip handles / extracted dirs) for page requests.
 const OPEN_BOOKS: usize = 3;
+/// Origin of the application's own page: the only one allowed to read
+/// `planche://` responses (any page is allowed in development, where the
+/// origin is the Vite server).
+#[cfg(not(debug_assertions))]
+const APP_ORIGIN: &str = if cfg!(any(windows, target_os = "android")) { "http://tauri.localhost" } else { "tauri://localhost" };
+#[cfg(debug_assertions)]
+const APP_ORIGIN: &str = "*";
+/// Threads answering `planche://` page and thumbnail requests at once.
+const PROTOCOL_THREADS: usize = 6;
+/// OPDS covers fetched at once: they wait on remote servers and must never
+/// take the slots of pages and thumbnails.
+const COVER_THREADS: usize = 4;
 
 pub struct AppState {
     pub db: Mutex<Connection>,
     pub cache_dir: PathBuf,
     pub thumb_dir: PathBuf,
     open: Mutex<Vec<(String, Arc<OpenBook>)>>,
+    /// One lock per book being opened: a second request for a book under
+    /// extraction waits for it instead of extracting the same archive twice.
+    opening: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     wake_thumbs: Mutex<Sender<()>>,
     initial_file: Mutex<Option<String>>,
+    /// Shown once in the window: the library had to be set aside at start.
+    startup_notice: Mutex<Option<String>>,
+    /// Paths learned by the backend itself (pickers, drops, command line, "Open
+    /// with"): the only ones `open_file` / `add_root` accept from the page, once
+    /// each. The page never names a path of its own.
+    allowed: Mutex<HashSet<String>>,
+    gate: Gate,
+    cover_gate: Gate,
     /// Where OPDS downloads go (Documents/Planche/OPDS); part of the library.
     download_dir: PathBuf,
     vault: vault::Vault,
 }
 
 impl AppState {
-    /// Writes the encrypted database snapshot now.
-    fn persist(&self) {
-        if let Err(e) = self.vault.save(&mut self.db.lock().unwrap()) {
-            eprintln!("saving the database failed: {e:#}");
+    /// Writes the encrypted database snapshot now; false when it failed (the
+    /// caller retries later rather than counting the changes as saved).
+    fn persist(&self) -> bool {
+        match self.vault.save(&mut self.db.lock().unwrap()) {
+            Ok(()) => true,
+            Err(e) => {
+                eprintln!("saving the database failed: {e:#}");
+                false
+            }
         }
+    }
+
+    fn allow(&self, path: &str) {
+        self.allowed.lock().unwrap().insert(path.to_owned());
+    }
+
+    fn take_allowed(&self, path: &str) -> bool {
+        self.allowed.lock().unwrap().remove(path)
+    }
+}
+
+/// Counting semaphore: `planche://` requests used to get a thread each, so a
+/// burst of page requests could hold many 256 MiB buffers at once.
+struct Gate {
+    free: Mutex<usize>,
+    cv: Condvar,
+}
+
+impl Gate {
+    fn new(slots: usize) -> Self {
+        Gate { free: Mutex::new(slots), cv: Condvar::new() }
+    }
+
+    fn enter(&self) -> GateSlot<'_> {
+        let mut free = self.free.lock().unwrap();
+        while *free == 0 {
+            free = self.cv.wait(free).unwrap();
+        }
+        *free -= 1;
+        GateSlot(self)
+    }
+}
+
+struct GateSlot<'a>(&'a Gate);
+
+impl Drop for GateSlot<'_> {
+    fn drop(&mut self) {
+        *self.0.free.lock().unwrap() += 1;
+        self.0.cv.notify_one();
     }
 }
 
@@ -47,12 +116,22 @@ fn err<E: std::fmt::Display>(e: E) -> String {
     format!("{e:#}")
 }
 
+/// Record ids are UUIDs made here. Commands that build a file name from an id
+/// (thumbnails) refuse anything else: no `..`, drive or separator can get in.
+fn valid_id(id: &str) -> bool {
+    id.len() == 36 && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
+}
+
+const PATH_REFUSED: &str = "Chemin refusé : il doit venir du sélecteur de fichiers";
+
 impl AppState {
     fn wake_thumbnails(&self) {
         let _ = self.wake_thumbs.lock().unwrap().send(());
     }
 
     fn opened(&self, id: &str) -> Res<Arc<OpenBook>> {
+        let lock = self.opening.lock().unwrap().entry(id.to_owned()).or_default().clone();
+        let _guard = lock.lock().unwrap();
         if let Some(b) = self.open.lock().unwrap().iter().find(|(k, _)| k == id) {
             return Ok(b.1.clone());
         }
@@ -90,6 +169,9 @@ fn get_library(state: State<Arc<AppState>>) -> Res<db::Library> {
 
 #[tauri::command(async)]
 fn add_root(state: State<'_, Arc<AppState>>, path: String) -> Res<()> {
+    if !state.take_allowed(&path) {
+        return Err(PATH_REFUSED.into());
+    }
     if !storage::is_dir(Path::new(&path)) {
         return Err("Dossier introuvable ou inaccessible".into());
     }
@@ -294,22 +376,68 @@ fn export_annotations(
     markdown: String,
     json: String,
 ) -> Res<Option<String>> {
+    // Android's document picker cannot switch formats: Markdown there.
+    #[cfg(target_os = "android")]
+    {
+        let _ = (title, json);
+        let storage = app.state::<tauri_plugin_planche_storage::Storage<tauri::Wry>>();
+        return Ok(storage.save_document(&default_name, "text/markdown", &markdown)?.map(|p| p.name));
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        use tauri_plugin_dialog::DialogExt;
+        let Some(picked) = app
+            .dialog()
+            .file()
+            .set_title(title)
+            .set_file_name(&default_name)
+            .add_filter("Markdown", &["md"])
+            .add_filter("W3C Web Annotation (JSON)", &["json"])
+            .blocking_save_file()
+        else {
+            return Ok(None);
+        };
+        let path = picked.into_path().map_err(err)?;
+        let is_json = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("json"));
+        std::fs::write(&path, if is_json { json } else { markdown }).map_err(err)?;
+        Ok(Some(path.to_string_lossy().into_owned()))
+    }
+}
+
+/// System picker for a book file. The dialog runs here, so the page only ever
+/// learns paths the user chose; `open_file` accepts nothing else.
+#[tauri::command(async)]
+fn pick_file(app: tauri::AppHandle, state: State<'_, Arc<AppState>>, title: String, filter: String) -> Res<Option<Picked>> {
+    let picked = pick(&app, &title, Some(&filter))?;
+    Ok(picked.inspect(|p| state.allow(&p.path)))
+}
+
+/// System picker for a library folder (see `pick_file`).
+#[tauri::command(async)]
+fn pick_folder(app: tauri::AppHandle, state: State<'_, Arc<AppState>>, title: String) -> Res<Option<Picked>> {
+    let picked = pick(&app, &title, None)?;
+    Ok(picked.inspect(|p| state.allow(&p.path)))
+}
+
+/// A file (with the book filter named `filter`) or a folder; None when cancelled.
+#[cfg(not(target_os = "android"))]
+fn pick(app: &tauri::AppHandle, title: &str, filter: Option<&str>) -> Res<Option<Picked>> {
     use tauri_plugin_dialog::DialogExt;
-    let Some(picked) = app
-        .dialog()
-        .file()
-        .set_title(title)
-        .set_file_name(&default_name)
-        .add_filter("Markdown", &["md"])
-        .add_filter("W3C Web Annotation (JSON)", &["json"])
-        .blocking_save_file()
-    else {
-        return Ok(None);
+    let dialog = app.dialog().file().set_title(title);
+    let picked = match filter {
+        Some(name) => dialog.add_filter(name, &scan::BOOK_EXTENSIONS).blocking_pick_file(),
+        None => dialog.blocking_pick_folder(),
     };
+    let Some(picked) = picked else { return Ok(None) };
     let path = picked.into_path().map_err(err)?;
-    let is_json = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("json"));
-    std::fs::write(&path, if is_json { json } else { markdown }).map_err(err)?;
-    Ok(Some(path.to_string_lossy().into_owned()))
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    Ok(Some(Picked { path: path.to_string_lossy().into_owned(), name }))
+}
+
+#[cfg(target_os = "android")]
+fn pick(app: &tauri::AppHandle, _title: &str, filter: Option<&str>) -> Res<Option<Picked>> {
+    let storage = app.state::<tauri_plugin_planche_storage::Storage<tauri::Wry>>();
+    if filter.is_some() { storage.pick_file() } else { storage.pick_folder() }
 }
 
 #[tauri::command]
@@ -346,10 +474,14 @@ fn set_manga(state: State<Arc<AppState>>, ids: Vec<String>, value: Option<bool>)
     Ok(())
 }
 
-/// Opens a file from outside the library (dialog, drag & drop, file
-/// association, Android picker) and returns the book id to read.
+/// Opens a file from outside the library and returns the book id to read.
+/// The path must have come from this backend (`pick_file`, a drop, the command
+/// line, "Open with"): the page cannot make the app read a file of its choice.
 #[tauri::command]
 fn open_file(state: State<Arc<AppState>>, path: String) -> Res<String> {
+    if !state.take_allowed(&path) {
+        return Err(PATH_REFUSED.into());
+    }
     let entry = storage::stat(Path::new(&path)).ok_or("Fichier introuvable")?;
     let kind = if entry.is_dir { Some("folder") } else { scan::book_kind(&entry.name) };
     let kind = kind.ok_or("Format non pris en charge")?;
@@ -357,10 +489,12 @@ fn open_file(state: State<Arc<AppState>>, path: String) -> Res<String> {
     db::open_path(&state.db.lock().unwrap(), &path, kind, &name).map_err(err)
 }
 
-/// Shows the system "Open with" chooser for a file Planche cannot read (text
-/// EPUBs), since Planche may itself be the default handler.
+/// Shows the system "Open with" chooser for a book Planche cannot read (text
+/// EPUBs), since Planche may itself be the default handler. Takes a book id:
+/// the path comes from the library, not from the page.
 #[tauri::command]
-fn open_with_other_app(path: String) -> Res<()> {
+fn open_with_other_app(state: State<Arc<AppState>>, id: String) -> Res<()> {
+    let path = db::book(&state.db.lock().unwrap(), &id).map_err(err)?.ok_or("Livre introuvable")?.path;
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -382,6 +516,12 @@ fn open_with_other_app(path: String) -> Res<()> {
 #[tauri::command]
 fn take_initial_file(state: State<Arc<AppState>>) -> Option<String> {
     state.initial_file.lock().unwrap().take()
+}
+
+/// Message about the start of the app (library set aside), handed out once.
+#[tauri::command]
+fn take_startup_notice(state: State<Arc<AppState>>) -> Option<String> {
+    state.startup_notice.lock().unwrap().take()
 }
 
 #[tauri::command]
@@ -423,6 +563,9 @@ fn delete_bookmark(state: State<Arc<AppState>>, id: String) -> Res<()> {
 /// Thumbnail rendered by the front-end (PDF books).
 #[tauri::command]
 fn save_thumbnail(state: State<Arc<AppState>>, id: String, data: Vec<u8>) -> Res<()> {
+    if !valid_id(&id) {
+        return Err("bad id".into());
+    }
     let result = thumbs::write_thumbnail(&data, &state.thumb_dir.join(format!("{id}.jpg")));
     db::set_thumb(&state.db.lock().unwrap(), &id, if result.is_ok() { 1 } else { 2 }).map_err(err)?;
     result.map_err(err)
@@ -449,7 +592,7 @@ fn serve(state: &AppState, path: &str) -> Result<(Vec<u8>, String), (StatusCode,
             let bytes = b.page_bytes(n).map_err(|e| not_found(err(e)))?;
             Ok((bytes, book::mime_for(&b.pages[n]).into()))
         }
-        ["thumb", id] => {
+        ["thumb", id] if valid_id(id) => {
             let bytes = std::fs::read(state.thumb_dir.join(format!("{id}.jpg"))).map_err(|e| not_found(err(e)))?;
             Ok((bytes, "image/jpeg".into()))
         }
@@ -465,6 +608,54 @@ fn serve(state: &AppState, path: &str) -> Result<(Vec<u8>, String), (StatusCode,
     }
 }
 
+/// Asks whether to set the unreadable library aside and start empty.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn ask_set_aside(error: &str) -> bool {
+    use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
+    const RESET: &str = "Mettre de côté et repartir à vide";
+    let result = MessageDialog::new()
+        .set_level(MessageLevel::Error)
+        .set_title("Planche")
+        .set_description(format!(
+            "La bibliothèque ne peut pas être ouverte :\n{error}\n\n\
+             Mettre le fichier de côté (il est conservé dans le dossier des données de Planche) \
+             et repartir avec une bibliothèque vide ? Sinon Planche se ferme."
+        ))
+        .set_buttons(MessageButtons::OkCancelCustom(RESET.into(), "Quitter".into()))
+        .show();
+    matches!(result, MessageDialogResult::Ok) || matches!(result, MessageDialogResult::Custom(ref s) if s == RESET)
+}
+
+/// Opens the encrypted library. An unreadable snapshot (damaged file, key gone
+/// from the credential store) used to abort the process silently; now the
+/// desktop asks before setting it aside, and Android — no dialog before the
+/// window exists — sets it aside and reports it in the window.
+fn open_vault(app: &tauri::App, data: &Path) -> anyhow::Result<(Connection, vault::Vault, Option<String>)> {
+    // Fallback key file: under Windows the config and data folders are one
+    // (%APPDATA%), so the key goes to %LOCALAPPDATA%, apart from the snapshot.
+    let config = app.path().app_config_dir()?;
+    let (key_dir, legacy_key_dir) =
+        if cfg!(windows) { (app.path().app_local_data_dir()?, Some(config)) } else { (config, None) };
+    let error = match vault::Vault::open(data, &key_dir, legacy_key_dir.as_deref()) {
+        Ok((conn, vault)) => return Ok((conn, vault, None)),
+        Err(e) => e,
+    };
+    let message = format!("{error:#}");
+    eprintln!("library unreadable: {message}");
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    if !ask_set_aside(&message) {
+        return Err(error);
+    }
+    let kept = vault::Vault::set_aside(data)?;
+    let (conn, vault) = vault::Vault::open(data, &key_dir, None)?;
+    let notice = format!(
+        "La bibliothèque précédente n'a pas pu être ouverte ({message}). \
+         Elle a été mise de côté dans « {} » et une bibliothèque vide a été créée.",
+        kept.display()
+    );
+    Ok((conn, vault, Some(notice)))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
@@ -476,6 +667,7 @@ pub fn run() {
             let _ = w.set_focus();
         }
         if let Some(path) = book_file_arg(args, Path::new(&cwd)) {
+            app.state::<Arc<AppState>>().allow(&path);
             let _ = app.emit("open-file", path);
         }
     }));
@@ -483,25 +675,42 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_planche_storage::init())
+        // Dropped files: the paths are recorded here before the page hears of
+        // them, which is what lets `open_file` / `add_root` accept them.
+        .on_window_event(|window, event| {
+            if let WindowEvent::DragDrop(DragDropEvent::Drop { paths, .. }) = event {
+                let state = window.state::<Arc<AppState>>();
+                let paths: Vec<String> = paths.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+                for p in &paths {
+                    state.allow(p);
+                }
+                let _ = window.emit("files-dropped", paths);
+            }
+        })
         .register_asynchronous_uri_scheme_protocol("planche", |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             let path = request.uri().path().to_owned();
             let query = request.uri().query().unwrap_or("").to_owned();
             std::thread::spawn(move || {
                 let state = app.state::<Arc<AppState>>();
-                let result = match path.strip_prefix("/opds-img/") {
-                    Some(catalog_id) => opds_image(&state, catalog_id, &query),
-                    None => serve(&state, &path),
+                // Covers wait on remote servers: their own slots, so a slow
+                // catalog never holds back pages and thumbnails.
+                let (_slot, result) = match path.strip_prefix("/opds-img/") {
+                    Some(catalog_id) => (state.cover_gate.enter(), opds_image(&state, catalog_id, &query)),
+                    None => (state.gate.enter(), serve(&state, &path)),
                 };
                 let resp = match result {
                     Ok((bytes, mime)) => Response::builder()
                         .header("Content-Type", mime)
-                        .header("Access-Control-Allow-Origin", "*")
+                        .header("X-Content-Type-Options", "nosniff")
+                        .header("Access-Control-Allow-Origin", APP_ORIGIN)
                         .header("Cache-Control", "no-cache")
                         .body(bytes),
                     Err((status, msg)) => Response::builder()
                         .status(status)
-                        .header("Access-Control-Allow-Origin", "*")
+                        .header("Content-Type", "text/plain; charset=utf-8")
+                        .header("X-Content-Type-Options", "nosniff")
+                        .header("Access-Control-Allow-Origin", APP_ORIGIN)
                         .body(msg.into_bytes()),
                 };
                 responder.respond(resp.unwrap());
@@ -514,7 +723,7 @@ pub fn run() {
             std::fs::create_dir_all(&cache_dir)?;
             std::fs::create_dir_all(&thumb_dir)?;
             std::fs::create_dir_all(&data)?;
-            let (mut conn, vault) = vault::Vault::open(&data, &app.path().app_config_dir()?)?;
+            let (mut conn, vault, startup_notice) = open_vault(app, &data)?;
             db::init(&conn).context("database schema")?;
             opds::migrate(&conn).context("catalog schema")?;
             vault.save(&mut conn).context("saving the library")?;
@@ -525,29 +734,33 @@ pub fn run() {
                 .join("Planche")
                 .join("OPDS");
             let (tx, rx) = channel();
+            let initial_file = book_file_arg(std::env::args(), &std::env::current_dir().unwrap_or_default());
             let state = Arc::new(AppState {
                 db: Mutex::new(conn),
                 cache_dir,
                 thumb_dir,
                 open: Mutex::new(Vec::new()),
+                opening: Mutex::new(HashMap::new()),
                 wake_thumbs: Mutex::new(tx),
+                startup_notice: Mutex::new(startup_notice),
+                allowed: Mutex::new(initial_file.iter().cloned().collect()),
+                gate: Gate::new(PROTOCOL_THREADS),
+                cover_gate: Gate::new(COVER_THREADS),
                 download_dir,
                 vault,
-                initial_file: Mutex::new(book_file_arg(
-                    std::env::args(),
-                    &std::env::current_dir().unwrap_or_default(),
-                )),
+                initial_file: Mutex::new(initial_file),
             });
             app.manage(state.clone());
             // Persist the encrypted snapshot shortly after changes (and on exit).
+            // A failed write (file held by an antivirus or a sync client) is
+            // retried at the next tick rather than counted as saved.
             let saver = state.clone();
             std::thread::spawn(move || {
                 let mut saved = saver.db.lock().unwrap().total_changes();
                 loop {
                     std::thread::sleep(std::time::Duration::from_secs(2));
                     let now = saver.db.lock().unwrap().total_changes();
-                    if now != saved {
-                        saver.persist();
+                    if now != saved && saver.persist() {
                         saved = now;
                     }
                 }
@@ -573,7 +786,10 @@ pub fn run() {
             get_settings,
             set_settings,
             open_file,
+            pick_file,
+            pick_folder,
             take_initial_file,
+            take_startup_notice,
             open_with_other_app,
             get_book,
             list_annotations,
@@ -594,14 +810,26 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|_app, _event| {
             if let tauri::RunEvent::Exit = _event {
-                _app.state::<Arc<AppState>>().persist();
+                let state = _app.state::<Arc<AppState>>();
+                // A normal exit while the worker decodes a book: that book is
+                // not a crasher, it goes back to the queue (see thumbs::MARKER).
+                db::requeue_in_progress(&state.db.lock().unwrap());
+                let _ = std::fs::remove_file(state.thumb_dir.join(thumbs::MARKER));
+                for attempt in 0..3 {
+                    if state.persist() {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(200 * (attempt + 1)));
+                }
             }
             // macOS delivers "Open with" files as an event rather than argv.
             #[cfg(any(target_os = "macos", target_os = "ios"))]
             if let tauri::RunEvent::Opened { urls } = _event {
                 for path in urls.iter().filter_map(|u| u.to_file_path().ok()) {
                     let path = path.to_string_lossy().into_owned();
-                    *_app.state::<Arc<AppState>>().initial_file.lock().unwrap() = Some(path.clone());
+                    let state = _app.state::<Arc<AppState>>();
+                    state.allow(&path);
+                    *state.initial_file.lock().unwrap() = Some(path.clone());
                     let _ = _app.emit("open-file", path);
                 }
             }

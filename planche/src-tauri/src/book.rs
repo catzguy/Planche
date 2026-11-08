@@ -40,7 +40,9 @@ impl OpenBook {
                 if entry.size() > MAX_ENTRY_BYTES {
                     bail!("page too large");
                 }
-                let mut buf = Vec::with_capacity(entry.size() as usize);
+                // Reserve at most a few MiB up front: a forged size must not
+                // cost memory before any byte is read.
+                let mut buf = Vec::with_capacity(entry.size().min(PREALLOC_BYTES) as usize);
                 entry.take(MAX_ENTRY_BYTES + 1).read_to_end(&mut buf)?;
                 if buf.len() as u64 > MAX_ENTRY_BYTES {
                     bail!("page too large");
@@ -151,10 +153,17 @@ fn open_zip(path: &Path, epub: bool) -> Result<OpenBook> {
     Ok(OpenBook { source: Source::Zip(Mutex::new(zip)), pages })
 }
 
+/// Largest XML/XHTML document read from an EPUB (container, OPF, spine
+/// documents): a bigger one is read up to this limit only, so a
+/// decompression bomb cannot exhaust memory.
+pub const MAX_XML_BYTES: u64 = 4 * 1024 * 1024;
+/// Memory reserved before reading an archive entry whose declared size is untrusted.
+const PREALLOC_BYTES: u64 = 8 * 1024 * 1024;
+
 fn read_entry(zip: &mut zip::ZipArchive<File>, name: &str) -> Option<String> {
-    let mut s = String::new();
-    zip.by_name(name).ok()?.read_to_string(&mut s).ok()?;
-    Some(s)
+    let mut buf = Vec::new();
+    zip.by_name(name).ok()?.take(MAX_XML_BYTES).read_to_end(&mut buf).ok()?;
+    Some(String::from_utf8_lossy(&buf).into_owned())
 }
 
 /// Resolves `href` relative to the directory of `base` inside the archive.
@@ -251,8 +260,37 @@ fn extract_cached(path: &Path, kind: &str, cache_dir: &Path, book_id: &str) -> R
 /// of plain components, by this code, within these size limits (which also
 /// stop decompression bombs).
 pub const MAX_ENTRY_BYTES: u64 = 256 * 1024 * 1024;
-const MAX_EXTRACT_BYTES: u64 = 8 * 1024 * 1024 * 1024;
-const MAX_ENTRIES: usize = 100_000;
+pub const MAX_EXTRACT_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+pub const MAX_ENTRIES: usize = 100_000;
+/// RAR dictionaries above this size are refused before anything is unpacked:
+/// UnRAR allocates the whole window up front, and a window larger than the
+/// largest accepted entry only serves solid streams.
+pub const MAX_RAR_DICT_KIB: u32 = 256 * 1024;
+
+/// Refuses a RAR entry whose declared dictionary would make UnRAR allocate
+/// gigabytes (checked before `read` and `skip`: in a solid archive skipping
+/// unpacks too).
+pub fn check_rar_dict(entry: &unrar::FileHeader) -> Result<()> {
+    if entry.dict_size_kib > MAX_RAR_DICT_KIB {
+        bail!("rar: dictionary too large ({} MiB)", entry.dict_size_kib / 1024);
+    }
+    Ok(())
+}
+
+/// Running total of what skipping entries of a solid archive costs: they are
+/// unpacked all the same (UnRAR in test mode, 7z decoded to a sink).
+#[derive(Default)]
+pub struct SolidBudget(u64);
+
+impl SolidBudget {
+    pub fn spend(&mut self, size: u64) -> Result<()> {
+        self.0 = self.0.saturating_add(size);
+        if self.0 > MAX_EXTRACT_BYTES {
+            bail!("archive too large once decompressed");
+        }
+        Ok(())
+    }
+}
 
 /// `name` as a relative path of normal components, or None if it could
 /// escape the destination (`..`, absolute, drive or stream syntax).
@@ -292,6 +330,16 @@ impl Extractor<'_> {
         Ok(Some(self.dest.join(rel)))
     }
 
+    /// Accounts for an entry that is not written but has to be decoded all the
+    /// same (solid stream): it costs its declared size.
+    fn skip(&mut self, size: u64) -> Result<()> {
+        self.total = self.total.saturating_add(size);
+        if self.total > MAX_EXTRACT_BYTES {
+            bail!("archive too large once decompressed");
+        }
+        Ok(())
+    }
+
     /// Writes at most MAX_ENTRY_BYTES from `data`, whatever size was declared.
     fn write(&mut self, target: &Path, data: &mut dyn Read) -> Result<()> {
         if let Some(parent) = target.parent() {
@@ -312,6 +360,8 @@ fn extract_rar(path: &Path, sink: &mut Extractor) -> Result<()> {
     let file = storage::open(path)?;
     let mut archive =
         unrar::Archive::new(&storage::native_path(path, &file)).open_for_processing().map_err(|e| anyhow!("rar: {e}"))?;
+    // Skipping an entry of a solid archive unpacks it (to nowhere): it counts.
+    let solid = archive.is_solid();
     let mut count = 0;
     while let Some(header) = archive.read_header().map_err(|e| anyhow!("rar: {e}"))? {
         count += 1;
@@ -319,11 +369,15 @@ fn extract_rar(path: &Path, sink: &mut Extractor) -> Result<()> {
             bail!("too many entries");
         }
         let entry = header.entry();
+        check_rar_dict(entry)?;
         let target = if entry.is_file() {
             sink.accept(&entry.filename.to_string_lossy(), entry.unpacked_size)?
         } else {
             None
         };
+        if solid && target.is_none() {
+            sink.skip(entry.unpacked_size)?;
+        }
         archive = match target {
             // The bytes are read in memory (size checked above) and written by
             // us: a link entry becomes a plain file, never a link.
@@ -339,30 +393,91 @@ fn extract_rar(path: &Path, sink: &mut Extractor) -> Result<()> {
 }
 
 fn extract_7z(path: &Path, sink: &mut Extractor) -> Result<()> {
+    // The reader is driven directly: the library's own path check would fail
+    // the whole book on a name that `safe_relative` simply ignores.
+    let mut reader = sevenz_rust2::ArchiveReader::new(storage::open(path)?, sevenz_rust2::Password::empty())
+        .map_err(|e| anyhow!("7z: {e}"))?;
+    let solid = reader.archive().is_solid;
     let mut count = 0;
     let mut failure: Option<anyhow::Error> = None;
-    sevenz_rust2::decompress_with_extract_fn(storage::open(path)?, sink.dest, |entry, reader, _| {
-        count += 1;
-        let step = (|| -> Result<()> {
-            if count > MAX_ENTRIES {
-                bail!("too many entries");
+    reader
+        .for_each_entries(|entry, data| {
+            if failure.is_some() {
+                return Ok(false);
             }
-            match (!entry.is_directory()).then(|| sink.accept(entry.name(), entry.size())).transpose()?.flatten() {
-                Some(target) => sink.write(&target, reader),
-                // Skipped entries are drained so solid streams stay aligned.
-                None => std::io::copy(reader, &mut std::io::sink()).map(drop).map_err(Into::into),
+            count += 1;
+            let step = (|| -> Result<()> {
+                if count > MAX_ENTRIES {
+                    bail!("too many entries");
+                }
+                match (!entry.is_directory()).then(|| sink.accept(entry.name(), entry.size())).transpose()?.flatten() {
+                    Some(target) => sink.write(&target, data),
+                    // A solid stream has to be decoded through skipped entries
+                    // to stay aligned, which costs their declared size; other
+                    // archives move to the next block for free.
+                    None if solid => {
+                        sink.skip(entry.size())?;
+                        std::io::copy(data, &mut std::io::sink())?;
+                        Ok(())
+                    }
+                    None => Ok(()),
+                }
+            })();
+            match step {
+                Ok(()) => Ok(true),
+                Err(e) => {
+                    failure = Some(e);
+                    Ok(false)
+                }
             }
-        })();
-        match step {
-            Ok(()) => Ok(true),
-            Err(e) => {
-                failure = Some(e);
-                Ok(false)
-            }
-        }
-    })
-    .map_err(|e| anyhow!("7z: {e}"))?;
+        })
+        .map_err(|e| anyhow!("7z: {e}"))?;
     failure.map_or(Ok(()), Err)
+}
+
+/// Bytes of the 7z entry `name`, within MAX_ENTRY_BYTES. In a solid archive
+/// `ArchiveReader::read_file` would read every entry stored before it into
+/// memory: those are decoded into a sink instead, within MAX_EXTRACT_BYTES.
+pub fn read_7z_entry(reader: &mut sevenz_rust2::ArchiveReader<File>, name: &str) -> Result<Vec<u8>> {
+    read_7z_entry_within(reader, name, MAX_EXTRACT_BYTES)
+}
+
+fn read_7z_entry_within<R: Read + std::io::Seek>(
+    reader: &mut sevenz_rust2::ArchiveReader<R>,
+    name: &str,
+    budget: u64,
+) -> Result<Vec<u8>> {
+    let size = reader.archive().files.iter().find(|f| f.name() == name).map_or(0, |f| f.size());
+    if size > MAX_ENTRY_BYTES {
+        bail!("page too large");
+    }
+    if !reader.archive().is_solid {
+        return reader.read_file(name).map_err(|e| anyhow!("7z: {e}"));
+    }
+    let (mut found, mut drained, mut failure) = (None, 0u64, None);
+    reader
+        .for_each_entries(|entry, data| {
+            if entry.name() == name {
+                let mut bytes = Vec::with_capacity(size.min(PREALLOC_BYTES) as usize);
+                data.take(MAX_ENTRY_BYTES + 1).read_to_end(&mut bytes)?;
+                found = Some(bytes);
+                return Ok(false);
+            }
+            drained = drained.saturating_add(entry.size());
+            if drained > budget {
+                failure = Some(anyhow!("archive too large once decompressed"));
+                return Ok(false);
+            }
+            std::io::copy(data, &mut std::io::sink())?;
+            Ok(true)
+        })
+        .map_err(|e| anyhow!("7z: {e}"))?;
+    match (failure, found) {
+        (Some(e), _) => Err(e),
+        (None, Some(bytes)) if bytes.len() as u64 > MAX_ENTRY_BYTES => bail!("page too large"),
+        (None, Some(bytes)) => Ok(bytes),
+        (None, None) => bail!("7z: entry not found"),
+    }
 }
 
 fn extract_tar(path: &Path, sink: &mut Extractor) -> Result<()> {
@@ -411,5 +526,104 @@ mod tests {
         for evil in ["../p.jpg", "a/../../p.jpg", "/etc/p.jpg", r"\\server\share\p.jpg", r"C:\p.jpg", "c:p.jpg", "p.jpg:stream", "", "./", r"a\..\..\p.jpg"] {
             assert_eq!(safe_relative(evil), None, "{evil}");
         }
+    }
+
+    /// The patched UnRAR (iterative header reading) and crate (no panic on
+    /// unknown codes, dictionary size exposed) still read real archives; a
+    /// password-protected one fails cleanly. Fixtures from the unrar crate.
+    #[test]
+    fn patched_unrar_reads_archives() {
+        let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("vendor/unrar/data");
+        let version = data.join("version.rar");
+        let names: Vec<_> = unrar::Archive::new(&version).open_for_listing().unwrap().map(|e| e.unwrap().filename).collect();
+        assert_eq!(names, vec![PathBuf::from("VERSION")]);
+        let header = unrar::Archive::new(&version).open_for_processing().unwrap().read_header().unwrap().unwrap();
+        check_rar_dict(header.entry()).unwrap();
+        assert!(header.entry().dict_size_kib > 0 && header.entry().dict_size_kib <= MAX_RAR_DICT_KIB);
+        assert_eq!(header.read().unwrap().0, b"unrar-0.4.0");
+
+        let solid = unrar::Archive::new(&data.join("solid.rar")).open_for_processing().unwrap();
+        assert!(solid.is_solid());
+        let mut archive = solid;
+        let mut count = 0;
+        while let Some(header) = archive.read_header().unwrap() {
+            count += 1;
+            archive = header.skip().unwrap();
+        }
+        assert!(count > 0);
+
+        let crypted = unrar::Archive::new(&data.join("crypted.rar")).open_for_processing();
+        let failed = match crypted {
+            Err(_) => true,
+            Ok(a) => match a.read_header() {
+                Err(_) => true,
+                Ok(None) => false,
+                Ok(Some(h)) => h.read().is_err(),
+            },
+        };
+        assert!(failed, "an encrypted archive without password is an error, not a panic");
+    }
+
+    /// Solid 7z: a name the library would reject (`..`) is skipped instead of
+    /// failing the book, skipped entries are decoded within the budget, and
+    /// reading one entry never buffers the ones stored before it.
+    #[test]
+    fn solid_7z_is_read_within_bounds() {
+        use sevenz_rust2::{ArchiveEntry, ArchiveWriter, SourceReader};
+        let dir = std::env::temp_dir().join(format!("planche-7z-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("solid.cb7");
+        let junk = vec![0u8; 3 * 1024 * 1024];
+        {
+            let mut w = ArchiveWriter::create(&path).unwrap();
+            let entries = vec![ArchiveEntry::new_file("../junk.bin"), ArchiveEntry::new_file("p1.jpg")];
+            let data: Vec<SourceReader<&[u8]>> = vec![junk.as_slice().into(), (&b"\xFF\xD8\xFF"[..]).into()];
+            w.push_archive_entries(entries, data).unwrap();
+            w.finish().unwrap();
+        }
+        let open = || sevenz_rust2::ArchiveReader::new(File::open(&path).unwrap(), sevenz_rust2::Password::empty()).unwrap();
+        assert!(open().archive().is_solid);
+        assert_eq!(read_7z_entry(&mut open(), "p1.jpg").unwrap(), b"\xFF\xD8\xFF");
+        // The 3 MiB stored before the page exceed a 1 MiB budget: refused, not buffered.
+        assert!(read_7z_entry_within(&mut open(), "p1.jpg", 1024 * 1024).is_err());
+        let dest = dir.join("out");
+        fs::create_dir_all(&dest).unwrap();
+        let mut sink = Extractor { dest: &dest, total: 0 };
+        extract_7z(&path, &mut sink).unwrap();
+        assert_eq!(fs::read(dest.join("p1.jpg")).unwrap(), b"\xFF\xD8\xFF");
+        assert!(!dir.join("junk.bin").exists());
+        assert_eq!(sink.total, junk.len() as u64 + 3, "skipped entries count");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// An EPUB whose OPF or XHTML inflates to gigabytes must not be read whole.
+    #[test]
+    fn epub_documents_are_read_up_to_the_limit() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join(format!("planche-bomb-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("bomb.epub");
+        {
+            let mut w = zip::ZipWriter::new(File::create(&path).unwrap());
+            let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+            w.start_file("OEBPS/big.xhtml", opts).unwrap();
+            // Highly compressible: tens of MiB stored in a few KiB.
+            let chunk = vec![b'a'; 1024 * 1024];
+            for _ in 0..(MAX_XML_BYTES / chunk.len() as u64 + 8) {
+                w.write_all(&chunk).unwrap();
+            }
+            w.start_file("page.jpg", opts).unwrap();
+            w.write_all(b"\xFF\xD8\xFF").unwrap();
+            w.finish().unwrap();
+        }
+        let mut zip = zip::ZipArchive::new(File::open(&path).unwrap()).unwrap();
+        let doc = read_entry(&mut zip, "OEBPS/big.xhtml").unwrap();
+        assert_eq!(doc.len() as u64, MAX_XML_BYTES);
+        // Page reads stay bounded by MAX_ENTRY_BYTES whatever the header says.
+        let book = open_zip(&path, false).unwrap();
+        assert_eq!(book.pages, vec!["page.jpg".to_string()]);
+        assert_eq!(book.page_bytes(0).unwrap(), b"\xFF\xD8\xFF");
+        let _ = fs::remove_dir_all(&dir);
     }
 }
