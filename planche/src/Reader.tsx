@@ -556,7 +556,7 @@ export function Reader({ bookId, startPage, settings, onSettings, siblings, onOp
         <p>{error}</p>
         {book?.kind === "epub" && (
           <p>
-            <button className="primary" onClick={() => api.openWithOtherApp(book.path).catch(() => revealItemInDir(book.path))}>
+            <button className="primary" onClick={() => api.openWithOtherApp(book.id).catch(() => revealItemInDir(book.path))}>
               {t("reader.openWith")}
             </button>
           </p>

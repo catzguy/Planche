@@ -40,7 +40,9 @@ impl OpenBook {
                 if entry.size() > MAX_ENTRY_BYTES {
                     bail!("page too large");
                 }
-                let mut buf = Vec::with_capacity(entry.size() as usize);
+                // Reserve at most a few MiB up front: a forged size must not
+                // cost memory before any byte is read.
+                let mut buf = Vec::with_capacity(entry.size().min(PREALLOC_BYTES) as usize);
                 entry.take(MAX_ENTRY_BYTES + 1).read_to_end(&mut buf)?;
                 if buf.len() as u64 > MAX_ENTRY_BYTES {
                     bail!("page too large");
@@ -151,10 +153,17 @@ fn open_zip(path: &Path, epub: bool) -> Result<OpenBook> {
     Ok(OpenBook { source: Source::Zip(Mutex::new(zip)), pages })
 }
 
+/// Largest XML/XHTML document read from an EPUB (container, OPF, spine
+/// documents): a bigger one is read up to this limit only, so a
+/// decompression bomb cannot exhaust memory.
+pub const MAX_XML_BYTES: u64 = 4 * 1024 * 1024;
+/// Memory reserved before reading an archive entry whose declared size is untrusted.
+const PREALLOC_BYTES: u64 = 8 * 1024 * 1024;
+
 fn read_entry(zip: &mut zip::ZipArchive<File>, name: &str) -> Option<String> {
-    let mut s = String::new();
-    zip.by_name(name).ok()?.read_to_string(&mut s).ok()?;
-    Some(s)
+    let mut buf = Vec::new();
+    zip.by_name(name).ok()?.take(MAX_XML_BYTES).read_to_end(&mut buf).ok()?;
+    Some(String::from_utf8_lossy(&buf).into_owned())
 }
 
 /// Resolves `href` relative to the directory of `base` inside the archive.
@@ -411,5 +420,35 @@ mod tests {
         for evil in ["../p.jpg", "a/../../p.jpg", "/etc/p.jpg", r"\\server\share\p.jpg", r"C:\p.jpg", "c:p.jpg", "p.jpg:stream", "", "./", r"a\..\..\p.jpg"] {
             assert_eq!(safe_relative(evil), None, "{evil}");
         }
+    }
+
+    /// An EPUB whose OPF or XHTML inflates to gigabytes must not be read whole.
+    #[test]
+    fn epub_documents_are_read_up_to_the_limit() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join(format!("planche-bomb-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("bomb.epub");
+        {
+            let mut w = zip::ZipWriter::new(File::create(&path).unwrap());
+            let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+            w.start_file("OEBPS/big.xhtml", opts).unwrap();
+            // Highly compressible: tens of MiB stored in a few KiB.
+            let chunk = vec![b'a'; 1024 * 1024];
+            for _ in 0..(MAX_XML_BYTES / chunk.len() as u64 + 8) {
+                w.write_all(&chunk).unwrap();
+            }
+            w.start_file("page.jpg", opts).unwrap();
+            w.write_all(b"\xFF\xD8\xFF").unwrap();
+            w.finish().unwrap();
+        }
+        let mut zip = zip::ZipArchive::new(File::open(&path).unwrap()).unwrap();
+        let doc = read_entry(&mut zip, "OEBPS/big.xhtml").unwrap();
+        assert_eq!(doc.len() as u64, MAX_XML_BYTES);
+        // Page reads stay bounded by MAX_ENTRY_BYTES whatever the header says.
+        let book = open_zip(&path, false).unwrap();
+        assert_eq!(book.pages, vec!["page.jpg".to_string()]);
+        assert_eq!(book.page_bytes(0).unwrap(), b"\xFF\xD8\xFF");
+        let _ = fs::remove_dir_all(&dir);
     }
 }

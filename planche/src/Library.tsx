@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
 import { api, Book, Bookmark, bookSubtitle, bookTitle, Library as Lib, Shelf, thumbUrl } from "./api";
 import { Annotation, annotationsApi, exportAnnotations } from "./annotations";
 import { ltr, t, tn } from "./i18n";
@@ -7,7 +6,7 @@ import { Settings, SortMode } from "./settings";
 import { useShortcuts } from "./shortcuts";
 import { CatalogBrowser, CatalogDialog } from "./Catalogs";
 import { Catalog, opdsApi } from "./opds";
-import { isAndroid, pickFile, pickFolder } from "./platform";
+import { pickFile, pickFolder } from "./platform";
 
 export type SmartView =
   | "library"
@@ -226,19 +225,12 @@ export function Library(props: Props) {
   };
 
   const openFile = async () => {
-    const path = isAndroid
-      ? (await pickFile())?.path
-      : await open({
-          title: t("library.openFileTitle"),
-          filters: [{ name: t("library.fileFilter"), extensions: BOOK_EXTENSIONS }],
-        });
+    const path = (await pickFile())?.path;
     if (typeof path === "string") onOpenFile(path);
   };
 
   const addFolder = async () => {
-    const path = isAndroid
-      ? (await pickFolder())?.path
-      : await open({ directory: true, title: t("library.chooseFolder") });
+    const path = (await pickFolder())?.path;
     if (typeof path === "string") await run(t("library.scanning"), () => api.addRoot(path));
   };
 

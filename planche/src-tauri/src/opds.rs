@@ -19,6 +19,8 @@ use url::Url;
 
 const KEYRING_SERVICE: &str = "Planche OPDS";
 const MAX_FEED_BYTES: usize = 20 * 1024 * 1024;
+const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
+const MAX_DOWNLOAD_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 const ACCEPT_FEED: &str =
     "application/opds+json, application/atom+xml;profile=opds-catalog, application/atom+xml, application/json;q=0.9, */*;q=0.5";
 
@@ -214,23 +216,39 @@ pub async fn fetch(catalog: &Catalog, url: &str) -> Result<Fetched> {
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_owned();
-    let bytes = resp.bytes().await?;
-    if bytes.len() > MAX_FEED_BYTES {
-        bail!("feed too large");
-    }
+    let bytes = body_limited(resp, MAX_FEED_BYTES, "feed").await?;
     Ok(Fetched { url: final_url, content_type, body: String::from_utf8_lossy(&bytes).into_owned() })
 }
 
-/// Cover images, through the catalog's credentials.
+/// Reads a response body of at most `max` bytes. The declared length is
+/// checked first, then the bytes actually received: a server cannot make the
+/// app buffer an endless body.
+async fn body_limited(mut resp: reqwest::Response, max: usize, what: &str) -> Result<Vec<u8>> {
+    if resp.content_length().is_some_and(|n| n > max as u64) {
+        bail!("{what} too large");
+    }
+    let mut out = Vec::new();
+    while let Some(chunk) = resp.chunk().await? {
+        if out.len() + chunk.len() > max {
+            bail!("{what} too large");
+        }
+        out.extend_from_slice(&chunk);
+    }
+    Ok(out)
+}
+
+/// Cover images, through the catalog's credentials. Only served as an image:
+/// whatever the server claims, the bytes never get an active media type.
 pub async fn image(catalog: &Catalog, url: &str) -> Result<(Vec<u8>, String)> {
     let resp = request(catalog, url, "image/*").await?;
     let ct = resp
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("image/jpeg")
-        .to_owned();
-    Ok((resp.bytes().await?.to_vec(), ct))
+        .map(|v| v.split(';').next().unwrap_or("").trim().to_ascii_lowercase())
+        .filter(|v| v.starts_with("image/"))
+        .unwrap_or_else(|| "application/octet-stream".into());
+    Ok((body_limited(resp, MAX_IMAGE_BYTES, "image").await?, ct))
 }
 
 /// File extension for a download, from its media type or the URL.
@@ -314,14 +332,22 @@ pub async fn download(
     let path = unique_path(dir, &sanitize(&stem), &ext);
     let partial = path.with_extension(format!("{ext}.part"));
     let total = resp.content_length();
+    if total.is_some_and(|n| n > MAX_DOWNLOAD_BYTES) {
+        bail!("fichier trop volumineux (limite {} Gio)", MAX_DOWNLOAD_BYTES >> 30);
+    }
     let mut file = std::fs::File::create(&partial)?;
     let mut received = 0u64;
     let mut stream = resp.bytes_stream();
     let mut last = std::time::Instant::now();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
-        file.write_all(&chunk)?;
         received += chunk.len() as u64;
+        if received > MAX_DOWNLOAD_BYTES {
+            drop(file);
+            let _ = std::fs::remove_file(&partial);
+            bail!("fichier trop volumineux (limite {} Gio)", MAX_DOWNLOAD_BYTES >> 30);
+        }
+        file.write_all(&chunk)?;
         if last.elapsed() > Duration::from_millis(200) {
             progress(received, total);
             last = std::time::Instant::now();

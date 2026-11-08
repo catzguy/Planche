@@ -435,6 +435,22 @@ pub fn set_thumb(conn: &Connection, id: &str, state: i64) -> Result<()> {
     Ok(())
 }
 
+/// `thumb` / `meta` state while the worker is on the file (0 to do, 1 done, 2 failed).
+pub const IN_PROGRESS: i64 = 3;
+
+pub fn set_meta_state(conn: &Connection, id: &str, state: i64) -> Result<()> {
+    conn.execute("UPDATE books SET meta = ?2 WHERE id = ?1", params![id, state])?;
+    Ok(())
+}
+
+/// Books the worker was on when the process died (a file that crashes a
+/// decoder): recorded as failed / without metadata so they are not retried
+/// at every start.
+pub fn reset_interrupted(conn: &Connection) {
+    let _ = conn.execute("UPDATE books SET thumb = 2 WHERE thumb = ?1", [IN_PROGRESS]);
+    let _ = conn.execute("UPDATE books SET meta = 1 WHERE meta = ?1", [IN_PROGRESS]);
+}
+
 pub fn kv_get(conn: &Connection, key: &str) -> Result<Option<String>> {
     Ok(conn
         .query_row("SELECT value FROM kv WHERE key = ?1", [key], |r| r.get(0))

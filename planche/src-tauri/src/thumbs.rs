@@ -71,8 +71,25 @@ fn cover_and_count(state: &AppState, path: &Path, kind: &str, id: &str) -> Resul
     }
 }
 
+/// Decoding limits for cover images: a tiny PNG can declare 100 000 × 100 000
+/// pixels, and the default limits would let it allocate 512 MiB.
+const MAX_IMAGE_SIDE: u32 = 10_000;
+const MAX_IMAGE_ALLOC: u64 = 192 * 1024 * 1024;
+
+/// Decodes an image within [`MAX_IMAGE_SIDE`] and [`MAX_IMAGE_ALLOC`]: the
+/// dimensions are checked before any pixel buffer is allocated.
+pub fn decode_image(bytes: &[u8]) -> Result<image::DynamicImage> {
+    let mut reader = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(MAX_IMAGE_SIDE);
+    limits.max_image_height = Some(MAX_IMAGE_SIDE);
+    limits.max_alloc = Some(MAX_IMAGE_ALLOC);
+    reader.limits(limits);
+    Ok(reader.decode()?)
+}
+
 pub fn write_thumbnail(bytes: &[u8], dest: &Path) -> Result<()> {
-    let img = image::load_from_memory(bytes)?;
+    let img = decode_image(bytes)?;
     let thumb = img.thumbnail(THUMB_W, THUMB_H).to_rgb8();
     let mut out = Cursor::new(Vec::new());
     thumb.write_to(&mut out, ImageFormat::Jpeg)?;
@@ -81,6 +98,7 @@ pub fn write_thumbnail(bytes: &[u8], dest: &Path) -> Result<()> {
 }
 
 pub fn run(app: AppHandle, state: Arc<AppState>, wake: Receiver<()>) {
+    db::reset_interrupted(&state.db.lock().unwrap());
     while wake.recv().is_ok() {
         while wake.try_recv().is_ok() {}
         let mut done = 0usize;
@@ -96,6 +114,18 @@ pub fn run(app: AppHandle, state: Arc<AppState>, wake: Receiver<()>) {
                 .ok()
             };
             let Some((id, path, kind, need_thumb, need_meta)) = next else { break };
+            // Marked "in progress" first: if decoding this file kills the
+            // process, the next start records a failure instead of retrying
+            // the same file forever (see `reset_interrupted`).
+            {
+                let conn = state.db.lock().unwrap();
+                if need_thumb {
+                    let _ = db::set_thumb(&conn, &id, db::IN_PROGRESS);
+                }
+                if need_meta {
+                    let _ = db::set_meta_state(&conn, &id, db::IN_PROGRESS);
+                }
+            }
             let thumb = need_thumb.then(|| {
                 cover_and_count(&state, Path::new(&path), &kind, &id).and_then(|(bytes, count)| {
                     write_thumbnail(&bytes, &state.thumb_dir.join(format!("{id}.jpg")))?;
@@ -134,5 +164,57 @@ pub fn run(app: AppHandle, state: Arc<AppState>, wake: Receiver<()>) {
         if done > 0 {
             let _ = app.emit("library-changed", ());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// IHDR declaring `side` × `side` pixels, with no image data.
+    fn png_header(side: u32) -> Vec<u8> {
+        let mut ihdr = Vec::new();
+        ihdr.extend_from_slice(b"IHDR");
+        ihdr.extend_from_slice(&side.to_be_bytes());
+        ihdr.extend_from_slice(&side.to_be_bytes());
+        ihdr.extend_from_slice(&[8, 2, 0, 0, 0]); // 8-bit RGB
+        let crc = {
+            // CRC-32 as PNG wants it; the decoder checks it before the dimensions.
+            let mut c = 0xFFFF_FFFFu32;
+            for b in &ihdr {
+                c ^= *b as u32;
+                for _ in 0..8 {
+                    c = if c & 1 == 1 { (c >> 1) ^ 0xEDB8_8320 } else { c >> 1 };
+                }
+            }
+            !c
+        };
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        png.extend_from_slice(&13u32.to_be_bytes());
+        png.extend_from_slice(&ihdr);
+        png.extend_from_slice(&crc.to_be_bytes());
+        png
+    }
+
+    #[test]
+    fn oversized_images_are_refused_before_decoding() {
+        let huge = png_header(100_000);
+        let err = decode_image(&huge).unwrap_err().to_string().to_lowercase();
+        assert!(err.contains("limit") || err.contains("dimension"), "{err}");
+        // A plausible page still decodes (header only here: the error must
+        // then be about the missing data, not about the limits).
+        let err = decode_image(&png_header(4_000)).unwrap_err().to_string().to_lowercase();
+        assert!(!err.contains("limit"), "{err}");
+    }
+
+    #[test]
+    fn small_image_makes_a_thumbnail() {
+        let mut png = Cursor::new(Vec::new());
+        image::RgbImage::from_pixel(600, 900, image::Rgb([200, 30, 30])).write_to(&mut png, ImageFormat::Png).unwrap();
+        let dest = std::env::temp_dir().join(format!("planche-thumb-{}.jpg", std::process::id()));
+        write_thumbnail(&png.into_inner(), &dest).unwrap();
+        let thumb = decode_image(&std::fs::read(&dest).unwrap()).unwrap();
+        assert!(thumb.width() <= THUMB_W && thumb.height() <= THUMB_H);
+        let _ = std::fs::remove_file(&dest);
     }
 }

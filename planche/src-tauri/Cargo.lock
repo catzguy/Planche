@@ -3114,6 +3114,7 @@ dependencies = [
  "percent-encoding",
  "regex",
  "reqwest",
+ "rfd",
  "rusqlite",
  "rustls",
  "serde",
@@ -4482,6 +4483,7 @@ dependencies = [
 name = "tauri-plugin-planche-storage"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "tauri",
  "tauri-plugin",
 ]
