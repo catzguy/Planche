@@ -139,6 +139,7 @@
   "menu.markRead": "標示為已讀",
   "menu.markUnread": "標示為未讀",
   "menu.unfavorite": "從我的最愛移除",
+  "opds.passwordAgain": "新位址：請重新輸入密碼（密碼只會傳送到當初輸入它的伺服器）。",
   "pageMode.double": "雙頁",
   "pageMode.doubleCover": "雙頁(封面單獨顯示)",
   "pageMode.scroll": "連續捲動",

@@ -149,6 +149,7 @@
   "menu.markRead": "Označi kot prebrano",
   "menu.markUnread": "Označi kot neprebrano",
   "menu.unfavorite": "Odstrani iz priljubljenih",
+  "opds.passwordAgain": "Nov naslov: znova vnesite geslo (pošlje se le strežniku, za katerega je bilo vneseno).",
   "pageMode.double": "Dve strani",
   "pageMode.doubleCover": "Dve strani (platnica samostojno)",
   "pageMode.scroll": "Neprekinjeno pomikanje",

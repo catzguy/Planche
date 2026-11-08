@@ -2,6 +2,8 @@
 
 État audité : branche `fix/revue-securite-2026-11` (PR #22), HEAD `5468d19`, c'est-à-dire le code **après** les corrections des deux revues précédentes ([REVUE_SECURITE_2026-11-08.md](REVUE_SECURITE_2026-11-08.md), [AUDIT_OPEN_SOURCE_2026-11-08.md](AUDIT_OPEN_SOURCE_2026-11-08.md)). Ce document ne répète pas les constats déjà corrigés ; il signale ceux dont le correctif est incomplet.
 
+> **Mise à jour** : H-1 et M-1 à M-5 ont été corrigés ensuite dans la même PR — voir §8.
+
 ## 0. Périmètre, méthode, correspondance de pile
 
 **Méthode.** Orchestration de 171 agents : 8 chercheurs indépendants (SQLite ; parsing XML/JSON/fichiers ; réseau ; chemins et archives ; Tauri/IPC ; React ; Android et CI ; dépendances et code natif), chacun lisant le code et les sources des bibliothèques tierces (registre Cargo local, `node_modules`) ; puis, pour **chaque** constat, 3 vérificateurs adverses à lentilles distinctes (exactitude du code à HEAD, exploitabilité et sévérité, qualité du correctif) ; un constat n'est retenu que confirmé à la majorité ; enfin un critique de complétude a comparé la couverture à la liste du demandeur et relu les fichiers que personne n'avait cités. Résultat : 54 constats remontés, **53 confirmés**, 1 rejeté (§7). La sévérité retenue est la médiane des trois vérificateurs. Revue statique, aucun exploit construit, aucune exécution de fichier piégé.
@@ -410,10 +412,23 @@ Au-delà des sections 2 à 4 : CSP de production stricte et cohérente ; cadre E
 - **Non vérifié hors ligne** : le comportement de WebKitGTK face à `frame-src` pour une navigation déclenchée depuis le cadre sandboxé sans script (`meta refresh`, lien SVG) — le correctif F-9 (retrait de ces éléments avant rendu) rend la question sans objet ; la règle Android « `allowBackup=false` n'exclut pas le transfert d'appareil » (F-15) — le correctif `dataExtractionRules` est inoffensif quel que soit le verdict.
 - Vérifié par le critique : sous Linux/macOS le dépôt (glisser-déposer) d'une URL texte sur la fenêtre est bien bloqué par tauri-runtime-wry (le gestionnaire renvoie toujours `true`).
 
-## 8. Ordre d'application recommandé
+## 8. Corrections appliquées (H-1, M-1 à M-5)
 
-1. **H-1** (fichier témoin) — rend non persistants tous les plantages de décodeur ; puis **M-2 immédiat** (listage RAR en mode extraction) et **M-3** (codes inconnus, dictionnaire).
-2. **M-4** (`skip` comptabilisé, `read_7z_entry`) et **M-1** (délais, deux sémaphores) avec **F-11**.
-3. **M-5** (identifiants liés à l'origine) et **F-2**.
-4. Mise à jour **UnRAR 7.3.2** (M-2 de fond), avec la garde CI et la procédure documentée.
-5. Faibles par fichier : `opds.ts` (F-7), `book.rs` (F-8, F-12), `TextReader.tsx` (F-8, F-9), `lib.rs` (F-5, F-6, F-13, F-14, F-17), Android (F-15), CI (F-16).
+Appliquées dans la PR #22 après cet audit. Tests : 15 tests Rust (dont `patched_unrar_reads_archives`, `solid_7z_is_read_within_bounds`, `credentials_follow_the_origin`), `tsc`, Vite, compilation Windows (MSVC, release) et Android arm64 (UnRAR recompilé avec le NDK).
+
+| # | Correction | Fichiers |
+|---|---|---|
+| H-1 | Le worker écrit l'id du livre dans `thumbnails/.in_progress` avant de le décoder et l'efface après ; au démarrage, un fichier témoin restant fait passer ce livre en échec (`db::mark_interrupted`). À une fermeture normale, le livre en cours est remis en file (`db::requeue_in_progress`) et le témoin effacé. | `thumbs.rs`, `db.rs`, `lib.rs` |
+| M-1 | `read_timeout` de 30 s (sans réception, réarmé à chaque trame) ; délai total par requête : flux 120 s, couverture 60 s, téléchargement 30 min. Les couvertures ont leur propre sémaphore (4 fils), les pages et vignettes gardent leurs 6 fils. Avec F-11 : le `.part` est supprimé sur toute erreur (réseau, délai, disque, `rename`). | `opds.rs`, `lib.rs` |
+| M-2 | `RARReadHeaderEx` rendu itératif et borné dans la copie vendorisée d'UnRAR (même correction que l'amont 7.3.x) : plus de récursion, ni en mode liste ni sur fusion de volumes. Le listage reste en mode liste (le mode extraction décompresserait une archive solide entière pour la lister). La mise à jour complète vers unrarsrc 7.3.2 reste à faire (procédure dans `vendor/unrar_sys/vendor/README.md`). | `vendor/unrar_sys/vendor/unrar/dll.cpp` |
+| M-3 | Crate `unrar` vendorisée (`[patch.crates-io]`) : `ERAR_LARGE_DICT` connu, les trois `Code::from(…).unwrap()` deviennent `unwrap_or(Code::Unknown)`, les drapeaux inconnus sont tolérés (`from_bits_truncate`), `FileHeader::dict_size_kib` exposé. Planche refuse les dictionnaires de plus de 256 Mio (`check_rar_dict`) avant `read` comme avant `skip`, dans l'extraction, les vignettes et les métadonnées. | `vendor/unrar`, `vendor/unrar_sys/src/lib.rs`, `book.rs`, `thumbs.rs`, `meta.rs` |
+| M-4 | 7z : extraction pilotée par `ArchiveReader` (plus de contrôle de chemin de la bibliothèque qui faisait échouer tout le livre ; `safe_relative` ignore l'entrée), entrées sautées comptées dans le budget de 8 Gio et décodées seulement si l'archive est solide ; `read_7z_entry` remplace `read_file` (vignettes, métadonnées) : en archive solide les entrées précédentes sont décodées vers un puits, dans le budget, jamais mises en mémoire. RAR solide : `skip` compté dans le même budget (extraction, vignettes, métadonnées). | `book.rs`, `thumbs.rs`, `meta.rs` |
+| M-5 | `opds::save` relit l'adresse précédente : si l'origine (schéma, hôte, port) change, le mot de passe stocké est effacé (un nouveau mot de passe fourni avec le changement est enregistré) ; un id inconnu est une erreur. Le formulaire exige la ressaisie du mot de passe quand l'adresse change d'origine (`opds.passwordAgain`, 27 langues). | `opds.rs`, `Catalogs.tsx`, `locales/*.json` |
+
+Restent ouverts : les constats Faibles F-1 à F-17 et Info I-1 (§5.7 à §5.13), et la mise à jour d'UnRAR vers 7.3.2.
+
+## 9. Ordre d'application recommandé (constats restants)
+
+1. **F-2** (userinfo dans l'adresse) avec M-5 déjà appliqué.
+2. Mise à jour **UnRAR 7.3.2** (fond de M-2), avec la garde CI.
+3. Faibles par fichier : `opds.ts` (F-7), `book.rs` (F-8, F-12), `TextReader.tsx` (F-8, F-9), `lib.rs` (F-5, F-6, F-13, F-14, F-17), Android (F-15), CI (F-16).

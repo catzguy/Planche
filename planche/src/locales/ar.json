@@ -159,6 +159,7 @@
   "menu.markRead": "تعليم كمقروء",
   "menu.markUnread": "تعليم كغير مقروء",
   "menu.unfavorite": "إزالة من المفضلة",
+  "opds.passwordAgain": "عنوان جديد: أدخل كلمة المرور مرة أخرى (لا تُرسل إلا إلى الخادم الذي أُدخلت له).",
   "pageMode.double": "صفحتان",
   "pageMode.doubleCover": "صفحتان (الغلاف منفردًا)",
   "pageMode.scroll": "تمرير مستمر",

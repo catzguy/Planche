@@ -144,6 +144,7 @@
   "menu.markRead": "Marcar como leído",
   "menu.markUnread": "Marcar como no leído",
   "menu.unfavorite": "Quitar de favoritos",
+  "opds.passwordAgain": "Dirección nueva: vuelva a introducir la contraseña (solo se envía al servidor para el que se introdujo).",
   "pageMode.double": "Dos páginas",
   "pageMode.doubleCover": "Dos páginas (portada sola)",
   "pageMode.scroll": "Desplazamiento continuo",

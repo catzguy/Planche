@@ -144,6 +144,7 @@
   "menu.markRead": "Marcar como lido",
   "menu.markUnread": "Marcar como não lido",
   "menu.unfavorite": "Remover dos favoritos",
+  "opds.passwordAgain": "Novo endereço: digite a senha novamente (ela só é enviada ao servidor para o qual foi digitada).",
   "pageMode.double": "Duas páginas",
   "pageMode.doubleCover": "Duas páginas (capa sozinha)",
   "pageMode.scroll": "Rolagem contínua",

@@ -139,6 +139,7 @@
   "menu.markRead": "Markér som læst",
   "menu.markUnread": "Markér som ulæst",
   "menu.unfavorite": "Fjern fra favoritter",
+  "opds.passwordAgain": "Ny adresse: indtast adgangskoden igen (den sendes kun til den server, den blev indtastet til).",
   "pageMode.double": "To sider",
   "pageMode.doubleCover": "To sider (forside alene)",
   "pageMode.scroll": "Kontinuerlig rulning",

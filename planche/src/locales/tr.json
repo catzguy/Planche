@@ -139,6 +139,7 @@
   "menu.markRead": "Okundu olarak işaretle",
   "menu.markUnread": "Okunmadı olarak işaretle",
   "menu.unfavorite": "Favorilerden kaldır",
+  "opds.passwordAgain": "Yeni adres: parolayı yeniden girin (yalnızca girildiği sunucuya gönderilir).",
   "pageMode.double": "İki sayfa",
   "pageMode.doubleCover": "İki sayfa (yalnızca kapak tek)",
   "pageMode.scroll": "Sürekli kaydırma",

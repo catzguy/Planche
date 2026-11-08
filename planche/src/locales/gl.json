@@ -159,6 +159,7 @@
   "opds.namePlaceholder": "Ex.: A miña Komga",
   "opds.nextPage": "Páxina seguinte",
   "opds.password": "Contrasinal",
+  "opds.passwordAgain": "Enderezo novo: introduza de novo o contrasinal (só se envía ao servidor para o que se introduciu).",
   "opds.passwordHelp": "O contrasinal gárdase no almacén seguro do sistema (Xestor de credenciais de Windows, Chaveiro de macOS…) e só se envía ao servidor do catálogo.",
   "opds.passwordKept": "Sen cambios (deixe baleiro para conservalo)",
   "opds.path": "Ruta no catálogo",

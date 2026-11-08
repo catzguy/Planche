@@ -139,6 +139,7 @@
   "menu.markRead": "Merkitse luetuksi",
   "menu.markUnread": "Merkitse lukemattomaksi",
   "menu.unfavorite": "Poista suosikeista",
+  "opds.passwordAgain": "Uusi osoite: anna salasana uudelleen (se lähetetään vain palvelimelle, jota varten se annettiin).",
   "pageMode.double": "Kaksi sivua",
   "pageMode.doubleCover": "Kaksi sivua (kansi yksin)",
   "pageMode.scroll": "Jatkuva vieritys",

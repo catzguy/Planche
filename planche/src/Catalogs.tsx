@@ -32,7 +32,23 @@ export function CatalogDialog({ catalog, onClose, onSaved }: { catalog: Catalog 
     }
   })();
 
+  // The stored password is bound to the server it was entered for: the backend
+  // drops it when the catalog moves to another origin (scheme, host or port),
+  // so ask for it again rather than save a catalog that will answer 401.
+  const movedOrigin = (() => {
+    if (!catalog?.has_password) return false;
+    try {
+      return new URL(url).origin !== new URL(catalog.url).origin;
+    } catch {
+      return false;
+    }
+  })();
+
   const submit = async (test: boolean) => {
+    if (movedOrigin && !password) {
+      setStatus({ ok: false, text: t("opds.passwordAgain") });
+      return;
+    }
     setBusy(true);
     setStatus(null);
     try {
@@ -85,7 +101,8 @@ export function CatalogDialog({ catalog, onClose, onSaved }: { catalog: Catalog 
             type="password"
             value={password}
             autoComplete="current-password"
-            placeholder={catalog?.has_password ? t("opds.passwordKept") : ""}
+            required={movedOrigin}
+            placeholder={movedOrigin ? t("opds.passwordAgain") : catalog?.has_password ? t("opds.passwordKept") : ""}
             onChange={(e) => setPassword(e.target.value)}
           />
         </label>

@@ -159,6 +159,7 @@
   "opds.namePlaceholder": "Adib.: Nire Komga",
   "opds.nextPage": "Hurrengo orria",
   "opds.password": "Pasahitza",
+  "opds.passwordAgain": "Helbide berria: idatzi berriro pasahitza (sartu zen zerbitzarira bakarrik bidaltzen da).",
   "opds.passwordHelp": "Pasahitza sistemaren biltegi seguruan gordetzen da (Windows-eko Kredentzialen kudeatzailea, macOS-eko Giltza-sorta…) eta katalogoaren zerbitzarira soilik bidaltzen da.",
   "opds.passwordKept": "Aldatu gabe (utzi hutsik mantentzeko)",
   "opds.path": "Katalogoko bidea",

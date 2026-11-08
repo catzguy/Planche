@@ -144,6 +144,7 @@
   "menu.markRead": "Marca com a llegit",
   "menu.markUnread": "Marca com a no llegit",
   "menu.unfavorite": "Treu dels preferits",
+  "opds.passwordAgain": "Adreça nova: torneu a introduir la contrasenya (només s'envia al servidor per al qual es va introduir).",
   "pageMode.double": "Dues pàgines",
   "pageMode.doubleCover": "Dues pàgines (coberta sola)",
   "pageMode.scroll": "Desplaçament continu",

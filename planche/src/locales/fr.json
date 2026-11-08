@@ -159,6 +159,7 @@
   "opds.namePlaceholder": "Ex. : Ma Komga",
   "opds.nextPage": "Page suivante",
   "opds.password": "Mot de passe",
+  "opds.passwordAgain": "Nouvelle adresse : saisissez à nouveau le mot de passe (il n'est envoyé qu'au serveur pour lequel il a été saisi).",
   "opds.passwordHelp": "Le mot de passe est rangé dans le coffre sécurisé du système (Gestionnaire d'identification Windows, Trousseau macOS…) et n'est envoyé qu'au serveur du catalogue.",
   "opds.passwordKept": "Inchangé (laisser vide pour le conserver)",
   "opds.path": "Chemin dans le catalogue",

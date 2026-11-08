@@ -48,7 +48,7 @@ Points vérifiés sans problème : toutes les requêtes SQL sont paramétrées (
 
 - `style-src 'unsafe-inline'` reste nécessaire (styles React, feuilles de style des EPUB) : une injection CSS n'exécute pas de code mais pourrait altérer l'affichage.
 - Le cadre EPUB partage l'origine de l'application : **ne jamais activer les scripts d'EPUB** (`allowScriptedContent`) sans isoler d'abord le lecteur sur une origine séparée.
-- L'analyse des RAR utilise la bibliothèque C UnRAR (code natif) : la garder à jour.
+- L'analyse des RAR utilise la bibliothèque C++ UnRAR (code natif, `vendor/unrar_sys`, 7.1.0 corrigée : lecture des en-têtes itérative au lieu de récursive) via une copie de la crate `unrar` qui ne panique plus sur un code inconnu : la garder à jour (procédure dans `vendor/unrar_sys/vendor/README.md`). Planche refuse les dictionnaires RAR de plus de 256 Mio et compte ce que coûte le saut d'entrées d'une archive solide (RAR et 7z).
 - Les commandes IPC n'acceptent plus de chemin libre : les boîtes « Ouvrir » et « Ajouter un dossier » sont ouvertes par le moteur (`pick_file`, `pick_folder`), qui ne retient que les chemins choisis par l'utilisateur (ou reçus par glisser-déposer, ligne de commande, « Ouvrir avec ») ; `open_file` et `add_root` refusent tout autre chemin. Même après une injection de script, la page ne peut pas faire lire un fichier de son choix.
 - En développement (`tauri dev`) la CSP est désactivée (`devCsp: null`) ; la protection s'applique aux versions compilées.
 - À refaire régulièrement : `npm audit`, `cargo audit` ; mettre à jour Tauri, pdf.js, epub.js, UnRAR.

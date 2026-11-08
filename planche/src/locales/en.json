@@ -139,6 +139,7 @@
   "menu.markRead": "Mark as read",
   "menu.markUnread": "Mark as unread",
   "menu.unfavorite": "Remove from favorites",
+  "opds.passwordAgain": "New address: enter the password again (it is only sent to the server it was entered for).",
   "pageMode.double": "Two pages",
   "pageMode.doubleCover": "Two pages (cover alone)",
   "pageMode.scroll": "Continuous scroll",

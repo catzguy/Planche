@@ -451,6 +451,21 @@ pub fn reset_interrupted(conn: &Connection) {
     let _ = conn.execute("UPDATE books SET meta = 1 WHERE meta = ?1", [IN_PROGRESS]);
 }
 
+/// The book named by the worker's marker file when the process died while
+/// decoding it (the IN_PROGRESS mark may not have reached the snapshot):
+/// recorded as failed / without metadata, like `reset_interrupted`.
+pub fn mark_interrupted(conn: &Connection, id: &str) {
+    let _ = conn.execute("UPDATE books SET thumb = 2 WHERE id = ?1 AND thumb != 1", [id]);
+    let _ = conn.execute("UPDATE books SET meta = 1 WHERE id = ?1 AND meta != 1", [id]);
+}
+
+/// Normal exit while the worker is on a book: that book did not crash
+/// anything and goes back to the queue.
+pub fn requeue_in_progress(conn: &Connection) {
+    let _ = conn.execute("UPDATE books SET thumb = 0 WHERE thumb = ?1", [IN_PROGRESS]);
+    let _ = conn.execute("UPDATE books SET meta = 0 WHERE meta = ?1", [IN_PROGRESS]);
+}
+
 pub fn kv_get(conn: &Connection, key: &str) -> Result<Option<String>> {
     Ok(conn
         .query_row("SELECT value FROM kv WHERE key = ?1", [key], |r| r.get(0))

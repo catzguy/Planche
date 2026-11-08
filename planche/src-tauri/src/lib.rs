@@ -28,8 +28,11 @@ const OPEN_BOOKS: usize = 3;
 const APP_ORIGIN: &str = if cfg!(any(windows, target_os = "android")) { "http://tauri.localhost" } else { "tauri://localhost" };
 #[cfg(debug_assertions)]
 const APP_ORIGIN: &str = "*";
-/// Threads answering `planche://` requests at once (pages, thumbnails, covers).
+/// Threads answering `planche://` page and thumbnail requests at once.
 const PROTOCOL_THREADS: usize = 6;
+/// OPDS covers fetched at once: they wait on remote servers and must never
+/// take the slots of pages and thumbnails.
+const COVER_THREADS: usize = 4;
 
 pub struct AppState {
     pub db: Mutex<Connection>,
@@ -48,6 +51,7 @@ pub struct AppState {
     /// each. The page never names a path of its own.
     allowed: Mutex<HashSet<String>>,
     gate: Gate,
+    cover_gate: Gate,
     /// Where OPDS downloads go (Documents/Planche/OPDS); part of the library.
     download_dir: PathBuf,
     vault: vault::Vault,
@@ -689,10 +693,11 @@ pub fn run() {
             let query = request.uri().query().unwrap_or("").to_owned();
             std::thread::spawn(move || {
                 let state = app.state::<Arc<AppState>>();
-                let _slot = state.gate.enter();
-                let result = match path.strip_prefix("/opds-img/") {
-                    Some(catalog_id) => opds_image(&state, catalog_id, &query),
-                    None => serve(&state, &path),
+                // Covers wait on remote servers: their own slots, so a slow
+                // catalog never holds back pages and thumbnails.
+                let (_slot, result) = match path.strip_prefix("/opds-img/") {
+                    Some(catalog_id) => (state.cover_gate.enter(), opds_image(&state, catalog_id, &query)),
+                    None => (state.gate.enter(), serve(&state, &path)),
                 };
                 let resp = match result {
                     Ok((bytes, mime)) => Response::builder()
@@ -740,6 +745,7 @@ pub fn run() {
                 startup_notice: Mutex::new(startup_notice),
                 allowed: Mutex::new(initial_file.iter().cloned().collect()),
                 gate: Gate::new(PROTOCOL_THREADS),
+                cover_gate: Gate::new(COVER_THREADS),
                 download_dir,
                 vault,
                 initial_file: Mutex::new(initial_file),
@@ -805,6 +811,10 @@ pub fn run() {
         .run(|_app, _event| {
             if let tauri::RunEvent::Exit = _event {
                 let state = _app.state::<Arc<AppState>>();
+                // A normal exit while the worker decodes a book: that book is
+                // not a crasher, it goes back to the queue (see thumbs::MARKER).
+                db::requeue_in_progress(&state.db.lock().unwrap());
+                let _ = std::fs::remove_file(state.thumb_dir.join(thumbs::MARKER));
                 for attempt in 0..3 {
                     if state.persist() {
                         break;

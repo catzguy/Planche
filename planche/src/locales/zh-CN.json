@@ -139,6 +139,7 @@
   "menu.markRead": "标记为已读",
   "menu.markUnread": "标记为未读",
   "menu.unfavorite": "取消收藏",
+  "opds.passwordAgain": "新地址：请重新输入密码（密码只会发送到当初输入它的服务器）。",
   "pageMode.double": "双页",
   "pageMode.doubleCover": "双页(封面单独显示)",
   "pageMode.scroll": "连续滚动",

@@ -139,6 +139,7 @@
   "menu.markRead": "Markera som läst",
   "menu.markUnread": "Markera som oläst",
   "menu.unfavorite": "Ta bort från favoriter",
+  "opds.passwordAgain": "Ny adress: ange lösenordet igen (det skickas bara till servern det angavs för).",
   "pageMode.double": "Två sidor",
   "pageMode.doubleCover": "Två sidor (omslaget ensamt)",
   "pageMode.scroll": "Kontinuerlig rullning",

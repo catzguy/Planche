@@ -139,6 +139,7 @@
   "menu.markRead": "Markeren als gelezen",
   "menu.markUnread": "Markeren als ongelezen",
   "menu.unfavorite": "Uit favorieten verwijderen",
+  "opds.passwordAgain": "Nieuw adres: voer het wachtwoord opnieuw in (het wordt alleen naar de server gestuurd waarvoor het is ingevoerd).",
   "pageMode.double": "Twee pagina's",
   "pageMode.doubleCover": "Twee pagina's (omslag apart)",
   "pageMode.scroll": "Doorlopend scrollen",

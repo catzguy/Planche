@@ -29,6 +29,7 @@ fn cover_and_count(state: &AppState, path: &Path, kind: &str, id: &str) -> Resul
                 unrar::Archive::new(path)
                     .open_for_listing()
                     .map_err(|e| anyhow!("rar: {e}"))?
+                    .take(book::MAX_ENTRIES)
                     .filter_map(|e| e.ok())
                     .filter(|e| e.is_file())
                     .map(|e| e.filename.to_string_lossy().into_owned())
@@ -36,13 +37,19 @@ fn cover_and_count(state: &AppState, path: &Path, kind: &str, id: &str) -> Resul
             );
             let first = names.first().ok_or_else(|| anyhow!("no images"))?.clone();
             let mut archive = unrar::Archive::new(path).open_for_processing().map_err(|e| anyhow!("rar: {e}"))?;
+            let solid = archive.is_solid();
+            let mut budget = book::SolidBudget::default();
             while let Some(header) = archive.read_header().map_err(|e| anyhow!("rar: {e}"))? {
+                book::check_rar_dict(header.entry())?;
                 if header.entry().filename.to_string_lossy() == first {
                     if header.entry().unpacked_size > book::MAX_ENTRY_BYTES {
                         bail!("page too large");
                     }
                     let (bytes, _) = header.read().map_err(|e| anyhow!("rar: {e}"))?;
                     return Ok((bytes, names.len() as i64));
+                }
+                if solid {
+                    budget.spend(header.entry().unpacked_size)?;
                 }
                 archive = header.skip().map_err(|e| anyhow!("rar: {e}"))?;
             }
@@ -55,11 +62,7 @@ fn cover_and_count(state: &AppState, path: &Path, kind: &str, id: &str) -> Resul
                 reader.archive().files.iter().filter(|f| !f.is_directory()).map(|f| f.name().to_owned()).collect(),
             );
             let first = names.first().ok_or_else(|| anyhow!("no images"))?.clone();
-            let size = reader.archive().files.iter().find(|f| f.name() == first).map_or(0, |f| f.size());
-            if size > book::MAX_ENTRY_BYTES {
-                bail!("page too large");
-            }
-            let bytes = reader.read_file(&first).map_err(|e| anyhow!("7z: {e}"))?;
+            let bytes = book::read_7z_entry(&mut reader, &first)?;
             Ok((bytes, names.len() as i64))
         }
         real => match book::open(path, kind, &state.cache_dir, id) {
@@ -97,8 +100,22 @@ pub fn write_thumbnail(bytes: &[u8], dest: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Id of the book being decoded, kept on disk: the IN_PROGRESS mark lives in
+/// the in-memory database and reaches the snapshot only every 2 s, so a
+/// decoder that kills the process at once would otherwise be retried at every
+/// start.
+pub const MARKER: &str = ".in_progress";
+
 pub fn run(app: AppHandle, state: Arc<AppState>, wake: Receiver<()>) {
-    db::reset_interrupted(&state.db.lock().unwrap());
+    let marker = state.thumb_dir.join(MARKER);
+    {
+        let conn = state.db.lock().unwrap();
+        if let Ok(id) = std::fs::read_to_string(&marker) {
+            db::mark_interrupted(&conn, id.trim());
+            let _ = std::fs::remove_file(&marker);
+        }
+        db::reset_interrupted(&conn);
+    }
     while wake.recv().is_ok() {
         while wake.try_recv().is_ok() {}
         let mut done = 0usize;
@@ -126,6 +143,7 @@ pub fn run(app: AppHandle, state: Arc<AppState>, wake: Receiver<()>) {
                     let _ = db::set_meta_state(&conn, &id, db::IN_PROGRESS);
                 }
             }
+            let _ = std::fs::write(&marker, &id);
             let thumb = need_thumb.then(|| {
                 cover_and_count(&state, Path::new(&path), &kind, &id).and_then(|(bytes, count)| {
                     write_thumbnail(&bytes, &state.thumb_dir.join(format!("{id}.jpg")))?;
@@ -133,6 +151,7 @@ pub fn run(app: AppHandle, state: Arc<AppState>, wake: Receiver<()>) {
                 })
             });
             let metadata = need_meta.then(|| meta::read(Path::new(&path), &kind));
+            let _ = std::fs::remove_file(&marker);
             let conn = state.db.lock().unwrap();
             match thumb {
                 Some(Ok(count)) => {

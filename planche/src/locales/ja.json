@@ -139,6 +139,7 @@
   "menu.markRead": "既読にする",
   "menu.markUnread": "未読にする",
   "menu.unfavorite": "お気に入りから削除",
+  "opds.passwordAgain": "新しいアドレス：パスワードを再入力してください（入力したサーバーにのみ送信されます）。",
   "pageMode.double": "見開き",
   "pageMode.doubleCover": "見開き(表紙のみ単独)",
   "pageMode.scroll": "連続スクロール",

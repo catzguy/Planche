@@ -149,6 +149,7 @@
   "menu.markRead": "Označit jako přečtené",
   "menu.markUnread": "Označit jako nepřečtené",
   "menu.unfavorite": "Odebrat z oblíbených",
+  "opds.passwordAgain": "Nová adresa: zadejte znovu heslo (posílá se jen serveru, pro který bylo zadáno).",
   "pageMode.double": "Dvě stránky",
   "pageMode.doubleCover": "Dvě stránky (samostatná obálka)",
   "pageMode.scroll": "Souvislé posouvání",
