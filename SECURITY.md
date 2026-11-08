@@ -24,4 +24,4 @@ Hors périmètre : les serveurs OPDS tiers (Komga, Kavita…), le système d'exp
 
 ## Ce que fait déjà Planche
 
-Les fichiers ouverts et les catalogues sont considérés comme non fiables : voir [docs/SECURITE.md](docs/SECURITE.md), [docs/REVUE_SECURITE_2026-11-08.md](docs/REVUE_SECURITE_2026-11-08.md) et [docs/AUDIT_OPEN_SOURCE_2026-11-08.md](docs/AUDIT_OPEN_SOURCE_2026-11-08.md).
+Les fichiers ouverts et les catalogues sont considérés comme non fiables : voir [docs/SECURITE.md](docs/SECURITE.md), [docs/REVUE_SECURITE_2026-11-08.md](docs/REVUE_SECURITE_2026-11-08.md), [docs/AUDIT_OPEN_SOURCE_2026-11-08.md](docs/AUDIT_OPEN_SOURCE_2026-11-08.md) et [docs/AUDIT_BOITE_BLANCHE_2026-11-08.md](docs/AUDIT_BOITE_BLANCHE_2026-11-08.md) (constats ouverts et correctifs prévus).

@@ -12,6 +12,7 @@ Lecteur de bandes dessinées, mangas, PDF et EPUB pour Windows, Linux, macOS et 
 | [`docs/SECURITE.md`](docs/SECURITE.md) | Revue de sécurité et protection de la base |
 | [`docs/REVUE_SECURITE_2026-11-08.md`](docs/REVUE_SECURITE_2026-11-08.md) | Deuxième revue de sécurité (code, Android, CI) et corrections |
 | [`docs/AUDIT_OPEN_SOURCE_2026-11-08.md`](docs/AUDIT_OPEN_SOURCE_2026-11-08.md) | Audit avant publication du code : synthèse, secrets, correctifs restants |
+| [`docs/AUDIT_BOITE_BLANCHE_2026-11-08.md`](docs/AUDIT_BOITE_BLANCHE_2026-11-08.md) | Audit en boîte blanche (171 agents, constats vérifiés) : SQLite, OPDS/parsing, Tauri/React, Android, CI, UnRAR |
 | [`docs/MICROSOFT_STORE.md`](docs/MICROSOFT_STORE.md) | Publication sur le Microsoft Store (mise en place et fonctionnement) |
 
 **Télécharger** : [dernière version](https://github.com/catzguy/Planche/releases/latest) — installateur Windows (`.exe`, `.msi`), paquets Linux (`.deb`, `.rpm`, AppImage) et APK Android. La pré-version [`develop-latest`](https://github.com/catzguy/Planche/releases/tag/develop-latest) contient la dernière version de test, compilée depuis `develop`.

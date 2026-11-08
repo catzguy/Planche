@@ -40,7 +40,7 @@ Méthode : recherche dans l'arbre de travail **et dans l'intégralité de l'hist
 | Secret dans l'historique Git | **Aucun** (aucune correspondance de motif, aucun fichier de clé jamais ajouté). |
 | Fichiers de signature | `*.jks`, `*.keystore`, `keystore.properties`, `local.properties` ignorés par Git ; jamais commités ; `keystore.properties` écrit par la CI depuis les secrets et supprimé après compilation (PR #22). |
 | Secrets de CI | Uniquement via `secrets.*` et `vars.*` ; passés par `env:` ; `secrets: inherit` seulement sur `push`/`workflow_dispatch` ; les PR de forks compilent sans secrets. |
-| Données personnelles | Historique : commits signés avec `12049774+catzguy@users.noreply.github.com` (correct) **mais aussi** des commits portant l'adresse personnelle `s.dollard@free.fr` (S-16). Le dépôt étant déjà public, cette adresse est déjà visible ; voir §3. |
+| Données personnelles | Historique : commits signés avec `12049774+catzguy@users.noreply.github.com` (correct) **mais aussi** des commits portant une adresse e-mail personnelle (S-16 ; non reproduite ici). Le dépôt étant déjà public, cette adresse est déjà visible ; voir §3. |
 | Données utilisateur | Aucune base, vignette ou chemin de bibliothèque dans le dépôt ; les captures d'écran de la documentation ne contiennent pas de chemins personnels (vérifié par liste des fichiers suivis : aucune image hors icônes). |
 | Binaire suivi | `gen/android/gradle/wrapper/gradle-wrapper.jar` (standard Gradle). Recommandation : vérifier son empreinte en CI (voir §4.4). |
 
@@ -49,7 +49,7 @@ Protections côté GitHub déjà actives : secret scanning, push protection, Dep
 ## 3. Points propres à la publication
 
 ### S-16 — Adresse e-mail personnelle dans l'historique
-- **Mécanisme** : les premiers commits ont été faits avec `user.email = s.dollard@free.fr`. Toute copie du dépôt l'expose (spam, ciblage).
+- **Mécanisme** : les premiers commits ont été faits avec l'adresse e-mail personnelle du propriétaire en `user.email`. Toute copie du dépôt l'expose (spam, ciblage).
 - **Correctif** : réécrire l'historique est déconseillé (dépôt déjà public, signatures requises, PR fusionnées référencées) ; l'adresse est déjà indexée. Actions utiles :
   1. s'assurer que la configuration locale reste sur l'adresse `noreply` (c'est le cas des commits récents) :
      ```bash
