@@ -58,3 +58,8 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "ci"
+    ignore:
+      # v6 puts the caching component under proprietary terms of use; Planche
+      # only runs wrapper-validation, which v5 does under the MIT license.
+      - dependency-name: "gradle/actions/*"
+        versions: [">= 6"]
